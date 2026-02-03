@@ -1,18 +1,14 @@
 {
-  "name": "keshav",
+  "name": "velocita-server",
   "version": "1.0.0",
-  "description": "",
+  "description": "Velocita Backend with MongoDB",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "body-parser": "^2.2.2",
-    "cors": "^2.8.6",
-    "express": "^5.2.1"
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "mongoose": "^6.10.0"
   }
 }

@@ -1,64 +1,88 @@
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
+const mongoose = require('mongoose');
 
 const app = express();
-const PORT = 3000;
-
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// नकली डेटाबेस (Temporary Memory)
-let users = {}; 
+// 1. DATABASE CONNECTION (Yahan aapka Naya Link hai)
+// Note: Password mein '@' ko '%40' likha hai taaki error na aaye.
+const MONGO_URI = "mongodb+srv://admin:Keshav%402829@cluster0.tcdl2wy.mongodb.net/velocita?retryWrites=true&w=majority";
 
-// 1. जब ऐप कनेक्ट होगा
-app.post('/connect', (req, res) => {
+mongoose.connect(MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+})
+.then(() => console.log("✅ DATABASE CONNECTED (MongoDB)"))
+.catch(err => console.error("❌ DB ERROR:", err));
+
+// 2. DATA MODELS (User ka Khata)
+const userSchema = new mongoose.Schema({
+    email: String,
+    balance: { type: Number, default: 0.0000 },
+    dataSold: { type: Number, default: 0.00 },
+    lastActive: Date
+});
+const User = mongoose.model('User', userSchema);
+
+// 3. API ROUTES
+
+// Root Route
+app.get('/', (req, res) => {
+    res.send("VELOCITA SERVER IS ONLINE & CONNECTED TO DB 🚀");
+});
+
+// CONNECT (Login/Start Mining)
+app.post('/connect', async (req, res) => {
+    const { deviceId } = req.body; // App se Email aayega
+    if (!deviceId) return res.status(400).send("No ID");
+
+    // Check karein agar user pehle se hai
+    let user = await User.findOne({ email: deviceId });
+    
+    if (!user) {
+        // Naya user banayein
+        user = new User({ email: deviceId, balance: 0.0000, dataSold: 0.00 });
+        await user.save();
+        console.log(`🆕 NEW USER: ${deviceId}`);
+    } else {
+        console.log(`👋 WELCOME BACK: ${deviceId}`);
+    }
+    
+    res.json({ status: "Connected", balance: user.balance.toFixed(4) });
+});
+
+// PING (Mining Update)
+app.post('/ping', async (req, res) => {
     const { deviceId } = req.body;
     
-    if (!users[deviceId]) {
-        users[deviceId] = { 
-            balance: 0.00, 
-            dataSold: 0.00,
-            status: 'Online' 
-        };
-        console.log(`New User Joined: ${deviceId}`);
-    } else {
-        console.log(`User Reconnected: ${deviceId}`);
-    }
-    res.json({ success: true, message: "Connected", data: users[deviceId] });
-});
-
-// 2. जब ऐप पिंग करेगा (पैसे कमाने के लिए)
-app.post('/ping', (req, res) => {
-    const { deviceId } = req.body;
-
-    if (users[deviceId]) {
-        // SIMULATION: हर पिंग पर थोड़ा डाटा और पैसा बढ़ाओ
-        const mbSold = 2.0; 
-        const earnings = 0.004; // $0.004 per ping
-
-        users[deviceId].dataSold += mbSold;
-        users[deviceId].balance += earnings;
-
-        // टर्मिनल में लाइव कमाई दिखाओ
-        console.log(`User ${deviceId}: Balance $${users[deviceId].balance.toFixed(4)} | Data: ${users[deviceId].dataSold.toFixed(2)} MB`);
-
-        res.json({
-            success: true,
-            balance: users[deviceId].balance.toFixed(4),
-            dataSold: users[deviceId].dataSold.toFixed(2)
+    let user = await User.findOne({ email: deviceId });
+    if (user) {
+        // Har ping par thoda paisa aur data badhayein
+        user.balance += 0.0001;
+        user.dataSold += 0.05;
+        user.lastActive = new Date();
+        await user.save(); // Database mein SAVE karein
+        
+        res.json({ 
+            status: "Active", 
+            balance: user.balance.toFixed(4), 
+            dataSold: user.dataSold.toFixed(2) 
         });
     } else {
-        res.status(404).json({ success: false, message: "User not found" });
+        res.status(404).send("User not found");
     }
 });
 
-// SERVER START (UPDATED FOR MOBILE ACCESS)
-// '0.0.0.0' ka matlab hai server ab local network par visible hoga
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`-------------------------------------------`);
-    console.log(`🚀 VELOCITA SERVER RUNNING ON PORT ${PORT}`);
-    console.log(`   Network Access: http://192.168.0.8:${PORT}`); // Aapka IP dikhayega
-    console.log(`   Waiting for App to connect...`);
-    console.log(`-------------------------------------------`);
+// ADMIN STATS (Aapke liye)
+app.get('/admin/stats', async (req, res) => {
+    const allUsers = await User.find();
+    res.json(allUsers);
+});
+
+// SERVER START
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on Port ${PORT}`);
 });
