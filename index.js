@@ -23,7 +23,7 @@ const userSchema = new mongoose.Schema({
     hardwareId: { type: String, default: null },              
     hasClaimedReferral: { type: Boolean, default: false },    
     balance: { type: Number, default: 0.00 }, // ₹ Rupee
-    totalData: { type: Number, default: 0 },  // MB mein save hoga
+    totalData: { type: Number, default: 0 },  // Database mein ab Bytes save honge taaki Dashboard sahi dikhaye
     upiId: { type: String, default: "" },
     referralCode: { type: String, unique: true }, 
     referredBy: { type: String, default: null }, 
@@ -50,11 +50,19 @@ app.get('/', (req, res) => {
     res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳");
 });
 
-// 🔥 A. PING (Asli 50-50 Profit Split SDK Model) 🔥
+// 🔥 A. PING (Smart Bytes-to-MB Fix & 50-50 Profit Split) 🔥
 app.post('/ping', async (req, res) => {
-    // Ab Flutter app se 'usage' aayega (MBs mein) ki user ne kitna data share kiya hai
     const { deviceId, usage } = req.body; 
-    const usageMB = usage || 0; // Agar usage pass nahi hua toh 0 maan lo
+    
+    // Flutter app se aane wala data 
+    let incomingData = parseFloat(usage) || 0;
+    let usageMB = incomingData;
+
+    // 🛡️ AUTO-FIX SHIELD: Agar data 1000 se zyada hai, matlab app raw Bytes bhej rahi hai.
+    // Isey turant MB mein convert kar lo! (Taki fake Lakho rupaye na banein)
+    if (incomingData > 1000) {
+        usageMB = incomingData / (1024 * 1024);
+    }
 
     if (!deviceId) return res.status(400).json({ error: "No ID" });
 
@@ -74,20 +82,17 @@ app.post('/ping', async (req, res) => {
         const now = new Date();
         const diff = (now - new Date(user.lastActive)) / 1000;
         
-        // Agar user ne thoda bhi data share kiya hai (usageMB > 0)
+        // Agar user ne data share kiya hai (usageMB > 0)
         if (usageMB > 0) { 
-            // 🧮 MATHEMATICS OF 50% PROFIT:
-            // Pawns.app hume deta hai: ₹16 per GB (1024 MB)
-            // User ka hissa (50%): ₹8 per GB 
-            // Iska matlab 1 MB ka rate hua = ₹8 / 1024 = ₹0.0078125
-            
+            // 🧮 FIXED MATH: ₹8 per GB (1024 MB) = ₹0.0078125 per MB
             const ratePerMB = 0.0078125;
             const earning = usageMB * ratePerMB; 
             
             user.balance += earning; // Earning add ki
-            user.totalData += usageMB; // Total data update kiya
+            // 🔥 FIX: Database mein wapas Bytes mein save karo taaki HTML Dashboard sahi se divide (MB) karke dikhaye
+            user.totalData += (usageMB * 1024 * 1024); 
 
-            // 🎁 Referral Commission (10%) - Aapki jeb se nahi, balki us 100% pie ke earning wale hisse se
+            // 🎁 Referral Commission (10%)
             if (user.referredBy) {
                 const upline = await User.findOne({ deviceId: user.referredBy });
                 if (upline) {
@@ -96,8 +101,7 @@ app.post('/ping', async (req, res) => {
                 }
             }
         } else if (diff > 8) {
-            // BACKUP: Agar abhi app testing mode mein hai aur usage pass nahi kar rahi,
-            // Toh purana 0.01 wala system chalu rakho taaki dashboard khali na dikhe
+            // BACKUP: Agar usage 0 aati hai toh purana test mode chalne do
             const testEarning = 0.01; 
             user.balance += testEarning;
             
@@ -117,7 +121,7 @@ app.post('/ping', async (req, res) => {
             status: "active", 
             balance: user.balance.toFixed(4), // Accuracy ke liye 4 decimal points
             upiId: user.upiId,
-            totalDataShared: user.totalData.toFixed(2)
+            totalDataShared: (user.totalData / (1024 * 1024)).toFixed(2)
         });
     } catch (e) {
         console.error(e);
