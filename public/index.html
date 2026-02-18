@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Velocita Command Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00ff41;
+            --secondary: #03a9f4;
+            --bg: #050505;
+            --panel: #0a0a0a;
+            --border: #333;
+            --warning: #ffab00;
+        }
+        body {
+            background-color: var(--bg);
+            color: #e0e0e0;
+            font-family: 'Roboto Mono', monospace;
+            margin: 0;
+            padding: 20px;
+            background-image: linear-gradient(rgba(0, 255, 65, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0, 255, 65, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--primary);
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            text-shadow: 0 0 10px var(--primary);
+            margin-bottom: 30px;
+        }
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto 30px auto;
+        }
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--primary);
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
+            text-align: center;
+        }
+        .card h3 { color: #888; font-size: 14px; margin: 0 0 10px 0; }
+        .card .value { font-size: 32px; font-weight: bold; color: #fff; }
+        .money { color: var(--secondary) !important; text-shadow: 0 0 10px var(--secondary); }
+
+        .section-title {
+            max-width: 1200px;
+            margin: 40px auto 10px auto;
+            color: var(--primary);
+            font-family: 'Orbitron', sans-serif;
+            border-left: 4px solid var(--primary);
+            padding-left: 10px;
+        }
+
+        .table-container {
+            max-width: 1200px;
+            margin: 0 auto 40px auto;
+            border: 1px solid #333;
+            background: var(--panel);
+            overflow-x: auto;
+        }
+        table { width: 100%; border-collapse: collapse; min-width: 800px; }
+        th {
+            background: #111;
+            color: var(--primary);
+            padding: 15px;
+            text-align: left;
+            border-bottom: 2px solid var(--primary);
+        }
+        td { padding: 15px; border-bottom: 1px solid #222; color: #ccc; }
+        tr:hover { background-color: rgba(0, 255, 65, 0.05); }
+
+        .status-dot { height: 10px; width: 10px; background-color: #555; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .online { background-color: var(--primary); box-shadow: 0 0 8px var(--primary); }
+        
+        .payout-btn {
+            background: var(--primary);
+            color: black;
+            border: none;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+            border-radius: 3px;
+            transition: all 0.3s;
+        }
+        .payout-btn:hover { background: #fff; box-shadow: 0 0 10px #fff; }
+
+        .refresh-btn {
+            display: block;
+            margin: 20px auto;
+            background: transparent;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+            padding: 10px 30px;
+            font-family: 'Orbitron', sans-serif;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+        .refresh-btn:hover { background: var(--primary); color: #000; box-shadow: 0 0 20px var(--primary); }
+    </style>
+</head>
+<body>
+
+    <h1>🚀 VELOCITA COMMAND CENTER <span style="font-size:12px; vertical-align:middle; border:1px solid var(--primary); padding:2px 5px; border-radius:3px;">ROOT</span></h1>
+
+    <div class="dashboard-grid">
+        <div class="card">
+            <h3>TOTAL NODES</h3>
+            <div class="value" id="userCount">0</div>
+        </div>
+        <div class="card">
+            <h3>NETWORK REVENUE (LIABILITIES)</h3>
+            <div class="value money">₹<span id="totalMoney">0.00</span></div>
+        </div>
+        <div class="card">
+            <h3>PENDING PAYOUTS</h3>
+            <div class="value" style="color: var(--warning)" id="pendingCount">0</div>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="loadAllData()">🔄 SYNC GLOBAL DATA</button>
+
+    <div class="section-title">💸 PENDING WITHDRAWALS</div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>DATE</th>
+                    <th>USER EMAIL</th>
+                    <th>AMOUNT</th>
+                    <th>UPI ID / DETAILS</th>
+                    <th>ACTION</th>
+                </tr>
+            </thead>
+            <tbody id="payoutTable">
+                <tr><td colspan="5" style="text-align:center;">Scanning records...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section-title">📡 ACTIVE NETWORK NODES</div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>STATUS</th>
+                    <th>DEVICE ID (EMAIL)</th>
+                    <th>BALANCE</th>
+                    <th>TOTAL DATA</th>
+                    <th>LAST PING</th>
+                </tr>
+            </thead>
+            <tbody id="userTable">
+                <tr><td colspan="5" style="text-align:center; padding:20px;">Scanning Network...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // API Endpoints
+        const USERS_URL = "/admin/users";
+        const PAYOUTS_URL = "/admin/payouts";
+        const PAY_URL = "/admin/pay";
+
+        // 🔥 SECRET KEY (Username: admin | Password: velocita@2026) -> Base64 Code
+        const AUTH_TOKEN = "Basic YWRtaW46dmVsb2NpdGFAMjAyNg==";
+
+        async function loadAllData() {
+            try {
+                // 🔐 Header mein Password bhejna zaroori hai
+                const options = { headers: { 'Authorization': AUTH_TOKEN } };
+
+                // Fetch Users
+                const userRes = await fetch(USERS_URL, options);
+                
+                // Agar password galat hua ya server lock hua toh error show karega
+                if (!userRes.ok) throw new Error("Authentication Failed");
+                
+                const users = await userRes.json();
+
+                // Fetch Payouts
+                const payoutRes = await fetch(PAYOUTS_URL, options);
+                const payouts = await payoutRes.json();
+
+                updateUI(users, payouts);
+            } catch (error) {
+                console.error("Sync Error:", error);
+                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:red;'>🔒 Access Denied! Please check Admin Password.</td></tr>";
+            }
+        }
+
+        function updateUI(users, payouts) {
+            let userHtml = "";
+            let totalBal = 0;
+            
+            // Render User Table
+            users.forEach(user => {
+                totalBal += user.balance;
+                const lastActive = new Date(user.lastActive);
+                const isOnline = (new Date() - lastActive) / 1000 / 60 < 5; // Online if pinged in last 5 mins
+
+                userHtml += `
+                    <tr>
+                        <td><span class="status-dot ${isOnline ? 'online' : ''}"></span> ${isOnline ? 'ONLINE' : 'OFFLINE'}</td>
+                        <td style="color:white;">${user.deviceId}</td>
+                        <td style="color: var(--secondary); font-weight:bold;">₹${user.balance.toFixed(2)}</td>
+                        <td>${(user.totalData / (1024*1024)).toFixed(2)} MB</td>
+                        <td>${lastActive.toLocaleTimeString()}</td>
+                    </tr>
+                `;
+            });
+
+            // Render Payout Table
+            let payoutHtml = "";
+            payouts.forEach(p => {
+                payoutHtml += `
+                    <tr>
+                        <td>${new Date(p.date).toLocaleDateString()}</td>
+                        <td>${p.deviceId}</td>
+                        <td style="color: #00ff41; font-weight:bold;">₹${p.amount.toFixed(2)}</td>
+                        <td style="color: var(--warning);">${p.details}</td>
+                        <td><button class="payout-btn" onclick="markAsPaid('${p._id}')">MARK PAID</button></td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5' style='text-align:center;'>No users found</td></tr>";
+            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>Clear! No pending payouts.</td></tr>";
+            
+            document.getElementById("userCount").innerText = users.length;
+            document.getElementById("totalMoney").innerText = totalBal.toFixed(2);
+            document.getElementById("pendingCount").innerText = payouts.length;
+        }
+
+        // 🔥 FUNCTION: Payout button kaam karne ke liye
+        async function markAsPaid(payoutId) {
+            if(!confirm("Kya aapne sach mein is user ko UPI par paise bhej diye hain?")) return;
+
+            try {
+                const response = await fetch(PAY_URL, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': AUTH_TOKEN // 🔐 Payout pass karte waqt bhi password chahiye
+                    },
+                    body: JSON.stringify({ payoutId: payoutId })
+                });
+
+                if (response.ok) {
+                    alert("✅ Payout Marked as Paid!");
+                    loadAllData(); // Table ko turant update (refresh) kar dega
+                } else {
+                    alert("❌ Error marking payout.");
+                }
+            } catch (e) {
+                alert("❌ Connection Error.");
+            }
+        }
+
+        // Initial Load
+        loadAllData();
+        setInterval(loadAllData, 15000); // Auto sync every 15s
+    </script>
+</body>
+</html>
