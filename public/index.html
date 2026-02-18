@@ -173,30 +173,23 @@
         const PAYOUTS_URL = "/admin/payouts";
         const PAY_URL = "/admin/pay";
 
-        // 🔥 SECRET KEY (Username: admin | Password: velocita@2026) -> Base64 Code
-        const AUTH_TOKEN = "Basic YWRtaW46dmVsb2NpdGFAMjAyNg==";
-
         async function loadAllData() {
             try {
-                // 🔐 Header mein Password bhejna zaroori hai
-                const options = { headers: { 'Authorization': AUTH_TOKEN } };
-
-                // Fetch Users
-                const userRes = await fetch(USERS_URL, options);
+                // 🔥 NAYA FIX: Browser apne aap login password API ko de dega
+                const userRes = await fetch(USERS_URL, { credentials: 'same-origin' });
                 
-                // Agar password galat hua ya server lock hua toh error show karega
                 if (!userRes.ok) throw new Error("Authentication Failed");
                 
                 const users = await userRes.json();
 
                 // Fetch Payouts
-                const payoutRes = await fetch(PAYOUTS_URL, options);
+                const payoutRes = await fetch(PAYOUTS_URL, { credentials: 'same-origin' });
                 const payouts = await payoutRes.json();
 
                 updateUI(users, payouts);
             } catch (error) {
                 console.error("Sync Error:", error);
-                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:red;'>🔒 Access Denied! Please check Admin Password.</td></tr>";
+                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:red;'>🔒 Connection Error. Please refresh the page or Check Logs.</td></tr>";
             }
         }
 
@@ -235,7 +228,7 @@
                 `;
             });
 
-            document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5' style='text-align:center;'>No users found</td></tr>";
+            document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5' style='text-align:center;'>No active users found. App khol kar mining start karo!</td></tr>";
             document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>Clear! No pending payouts.</td></tr>";
             
             document.getElementById("userCount").innerText = users.length;
@@ -243,17 +236,14 @@
             document.getElementById("pendingCount").innerText = payouts.length;
         }
 
-        // 🔥 FUNCTION: Payout button kaam karne ke liye
         async function markAsPaid(payoutId) {
             if(!confirm("Kya aapne sach mein is user ko UPI par paise bhej diye hain?")) return;
 
             try {
                 const response = await fetch(PAY_URL, {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': AUTH_TOKEN // 🔐 Payout pass karte waqt bhi password chahiye
-                    },
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin', // 🔐 Payout pass karte waqt bhi automatic password jayega
                     body: JSON.stringify({ payoutId: payoutId })
                 });
 
