@@ -3,7 +3,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const path = require('path');
 const crypto = require('crypto');
-const fs = require('fs'); // 🔥 NAYA: File ko khud dhoondhne wala tool
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
@@ -22,8 +22,8 @@ const userSchema = new mongoose.Schema({
     deviceId: { type: String, required: true, unique: true }, 
     hardwareId: { type: String, default: null },              
     hasClaimedReferral: { type: Boolean, default: false },    
-    balance: { type: Number, default: 0.00 }, 
-    totalData: { type: Number, default: 0 },
+    balance: { type: Number, default: 0.00 }, // ₹ Rupee
+    totalData: { type: Number, default: 0 },  // MB mein save hoga
     upiId: { type: String, default: "" },
     referralCode: { type: String, unique: true }, 
     referredBy: { type: String, default: null }, 
@@ -50,14 +50,18 @@ app.get('/', (req, res) => {
     res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳");
 });
 
-// A. PING (Secured Mining Loop)
+// 🔥 A. PING (Asli 50-50 Profit Split SDK Model) 🔥
 app.post('/ping', async (req, res) => {
-    const { deviceId, usage } = req.body;
+    // Ab Flutter app se 'usage' aayega (MBs mein) ki user ne kitna data share kiya hai
+    const { deviceId, usage } = req.body; 
+    const usageMB = usage || 0; // Agar usage pass nahi hua toh 0 maan lo
+
     if (!deviceId) return res.status(400).json({ error: "No ID" });
 
     try {
         let user = await User.findOne({ deviceId });
 
+        // Agar naya user hai toh usko banakar database mein daalo
         if (!user) {
             const baseName = deviceId.split('@')[0].toUpperCase();
             const generatedCode = "VELO-" + baseName;
@@ -70,10 +74,20 @@ app.post('/ping', async (req, res) => {
         const now = new Date();
         const diff = (now - new Date(user.lastActive)) / 1000;
         
-        if (diff > 8) { 
-            const earning = 0.01; 
-            user.balance += earning;
+        // Agar user ne thoda bhi data share kiya hai (usageMB > 0)
+        if (usageMB > 0) { 
+            // 🧮 MATHEMATICS OF 50% PROFIT:
+            // Pawns.app hume deta hai: ₹16 per GB (1024 MB)
+            // User ka hissa (50%): ₹8 per GB 
+            // Iska matlab 1 MB ka rate hua = ₹8 / 1024 = ₹0.0078125
+            
+            const ratePerMB = 0.0078125;
+            const earning = usageMB * ratePerMB; 
+            
+            user.balance += earning; // Earning add ki
+            user.totalData += usageMB; // Total data update kiya
 
+            // 🎁 Referral Commission (10%) - Aapki jeb se nahi, balki us 100% pie ke earning wale hisse se
             if (user.referredBy) {
                 const upline = await User.findOne({ deviceId: user.referredBy });
                 if (upline) {
@@ -81,16 +95,29 @@ app.post('/ping', async (req, res) => {
                     await upline.save();
                 }
             }
-            user.lastActive = now;
+        } else if (diff > 8) {
+            // BACKUP: Agar abhi app testing mode mein hai aur usage pass nahi kar rahi,
+            // Toh purana 0.01 wala system chalu rakho taaki dashboard khali na dikhe
+            const testEarning = 0.01; 
+            user.balance += testEarning;
+            
+            if (user.referredBy) {
+                const upline = await User.findOne({ deviceId: user.referredBy });
+                if (upline) {
+                    upline.balance += (testEarning * 0.10);
+                    await upline.save();
+                }
+            }
         }
-
-        if (usage) user.totalData = usage;
+        
+        user.lastActive = now;
         await user.save();
 
         res.json({ 
             status: "active", 
-            balance: user.balance.toFixed(2), 
-            upiId: user.upiId 
+            balance: user.balance.toFixed(4), // Accuracy ke liye 4 decimal points
+            upiId: user.upiId,
+            totalDataShared: user.totalData.toFixed(2)
         });
     } catch (e) {
         console.error(e);
@@ -200,11 +227,8 @@ const adminAuth = (req, res, next) => {
 };
 
 // 🔥 NAYA FIX: Smart File Finder Route
-// Ab aap chahe /panel likho, /admin likho ya /dashboard, yeh file dhoondh lega!
 app.get(['/panel', '/admin', '/dashboard'], adminAuth, (req, res) => {
-    // Check 1: Kya index.html 'public' folder ke andar hai?
     const publicPath = path.join(__dirname, 'public', 'index.html');
-    // Check 2: Kya index.html bahar hi (main folder me) rakhi hai?
     const rootPath = path.join(__dirname, 'index.html');
 
     if (fs.existsSync(publicPath)) {
@@ -212,7 +236,6 @@ app.get(['/panel', '/admin', '/dashboard'], adminAuth, (req, res) => {
     } else if (fs.existsSync(rootPath)) {
         res.sendFile(rootPath);
     } else {
-        // Agar file kahin nahi mili toh ye error aayega (Cannot GET nahi aayega ab)
         res.status(404).send(`
             <h1 style="color: red; text-align: center; margin-top: 50px;">🚨 Error 404: HTML File Missing!</h1>
             <h3 style="text-align: center;">Bhai, server par 'index.html' file nahi mil rahi hai.</h3>
