@@ -3,7 +3,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const path = require('path');
 const crypto = require('crypto');
-const fs = require('fs');
+const fs = require('fs'); 
 
 const app = express();
 app.use(cors());
@@ -17,18 +17,21 @@ mongoose.connect(MONGO_URI)
     .catch(err => console.error("❌ DB ERROR:", err));
 
 // 2. DATA MODELS
-
 const userSchema = new mongoose.Schema({
     deviceId: { type: String, required: true, unique: true }, 
     hardwareId: { type: String, default: null },              
     hasClaimedReferral: { type: Boolean, default: false },    
-    balance: { type: Number, default: 0.00 }, // ₹ Rupee
-    totalData: { type: Number, default: 0 },  // Database mein ab Bytes save honge taaki Dashboard sahi dikhaye
+    balance: { type: Number, default: 0.00 }, 
+    totalData: { type: Number, default: 0 },
     upiId: { type: String, default: "" },
     referralCode: { type: String, unique: true }, 
     referredBy: { type: String, default: null }, 
     lastActive: { type: Date, default: Date.now },
-    joinedAt: { type: Date, default: Date.now }
+    joinedAt: { type: Date, default: Date.now },
+    
+    // 🛡️ Anti-Hack: Daily Limit Trackers for Tasks
+    dailyTaskEarnings: { type: Number, default: 0 },
+    lastTaskDate: { type: String, default: "" }
 });
 const User = mongoose.model('User', userSchema);
 
@@ -47,29 +50,17 @@ const Payout = mongoose.model('Payout', payoutSchema);
 // ==========================================
 
 app.get('/', (req, res) => {
-    res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳");
+    res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳 (With Anti-Hack Guard)");
 });
 
-// 🔥 A. PING (Smart Bytes-to-MB Fix & 50-50 Profit Split) 🔥
+// A. PING (Secured Mining Loop)
 app.post('/ping', async (req, res) => {
-    const { deviceId, usage } = req.body; 
-    
-    // Flutter app se aane wala data 
-    let incomingData = parseFloat(usage) || 0;
-    let usageMB = incomingData;
-
-    // 🛡️ AUTO-FIX SHIELD: Agar data 1000 se zyada hai, matlab app raw Bytes bhej rahi hai.
-    // Isey turant MB mein convert kar lo! (Taki fake Lakho rupaye na banein)
-    if (incomingData > 1000) {
-        usageMB = incomingData / (1024 * 1024);
-    }
-
+    const { deviceId, usage } = req.body;
     if (!deviceId) return res.status(400).json({ error: "No ID" });
 
     try {
         let user = await User.findOne({ deviceId });
 
-        // Agar naya user hai toh usko banakar database mein daalo
         if (!user) {
             const baseName = deviceId.split('@')[0].toUpperCase();
             const generatedCode = "VELO-" + baseName;
@@ -82,17 +73,12 @@ app.post('/ping', async (req, res) => {
         const now = new Date();
         const diff = (now - new Date(user.lastActive)) / 1000;
         
-        // Agar user ne data share kiya hai (usageMB > 0)
-        if (usageMB > 0) { 
-            // 🧮 FIXED MATH: ₹8 per GB (1024 MB) = ₹0.0078125 per MB
-            const ratePerMB = 0.0078125;
-            const earning = usageMB * ratePerMB; 
-            
-            user.balance += earning; // Earning add ki
-            // 🔥 FIX: Database mein wapas Bytes mein save karo taaki HTML Dashboard sahi se divide (MB) karke dikhaye
-            user.totalData += (usageMB * 1024 * 1024); 
+        // Mining Logic (Background Ping)
+        if (diff > 8) { 
+            const earning = 0.01; 
+            user.balance += earning;
 
-            // 🎁 Referral Commission (10%)
+            // Referral Earning Logic
             if (user.referredBy) {
                 const upline = await User.findOne({ deviceId: user.referredBy });
                 if (upline) {
@@ -100,28 +86,16 @@ app.post('/ping', async (req, res) => {
                     await upline.save();
                 }
             }
-        } else if (diff > 8) {
-            // BACKUP: Agar usage 0 aati hai toh purana test mode chalne do
-            const testEarning = 0.01; 
-            user.balance += testEarning;
-            
-            if (user.referredBy) {
-                const upline = await User.findOne({ deviceId: user.referredBy });
-                if (upline) {
-                    upline.balance += (testEarning * 0.10);
-                    await upline.save();
-                }
-            }
+            user.lastActive = now;
         }
-        
-        user.lastActive = now;
+
+        if (usage) user.totalData = usage;
         await user.save();
 
         res.json({ 
             status: "active", 
-            balance: user.balance.toFixed(4), // Accuracy ke liye 4 decimal points
-            upiId: user.upiId,
-            totalDataShared: (user.totalData / (1024 * 1024)).toFixed(2)
+            balance: user.balance.toFixed(4), 
+            upiId: user.upiId 
         });
     } catch (e) {
         console.error(e);
@@ -129,7 +103,54 @@ app.post('/ping', async (req, res) => {
     }
 });
 
-// B. WITHDRAW REQUEST
+// 🔥 B. UPDATE BALANCE API (For Quiz, Captcha, News - HIGH SECURITY)
+app.post('/updateBalance', async (req, res) => {
+    const { deviceId, amount, reason } = req.body;
+    
+    if (!deviceId || amount == null) return res.status(400).json({ error: "Missing data" });
+
+    try {
+        const user = await User.findOne({ deviceId });
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        const today = new Date().toISOString().substring(0, 10); // e.g., 2024-05-20
+
+        // Reset daily limit if it's a new day
+        if (user.lastTaskDate !== today) {
+            user.dailyTaskEarnings = 0;
+            user.lastTaskDate = today;
+        }
+
+        const requestedAmount = parseFloat(amount);
+
+        // 🛡️ ANTI-HACK: Prevent single abnormal requests (e.g. Someone trying to add ₹500 at once via Postman)
+        if (requestedAmount > 2.0) {
+            console.log(`🚨 HACK ATTEMPT: ${deviceId} tried to add ₹${requestedAmount} for ${reason}`);
+            return res.status(403).json({ error: "Suspicious activity detected!" });
+        }
+
+        // 🛡️ ANTI-HACK: Daily Cap (Max ₹15 per day from side tasks)
+        if (user.dailyTaskEarnings + requestedAmount > 15.0) {
+            console.log(`⚠️ DAILY LIMIT REACHED: ${deviceId} exceeded ₹15 task limit.`);
+            return res.status(429).json({ error: "Daily task limit reached." });
+        }
+
+        // ✅ If safe, add money
+        user.balance += requestedAmount;
+        user.dailyTaskEarnings += requestedAmount;
+        
+        await user.save();
+
+        console.log(`💰 TASK EARNED: ${deviceId} got ₹${requestedAmount} for [${reason}]. New Bal: ₹${user.balance.toFixed(4)}`);
+        res.json({ success: true, newBalance: user.balance });
+
+    } catch (e) {
+        console.error("Balance Update Error:", e);
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+// C. WITHDRAW REQUEST
 app.post('/withdraw', async (req, res) => {
     const { deviceId, method, details } = req.body;
     try {
@@ -159,7 +180,7 @@ app.post('/withdraw', async (req, res) => {
     }
 });
 
-// C. BIND REFERRAL
+// D. BIND REFERRAL
 app.post('/bindReferral', async (req, res) => {
     const { deviceId, hardwareId, promoCode } = req.body;
     try {
@@ -196,7 +217,40 @@ app.post('/bindReferral', async (req, res) => {
     }
 });
 
-// D. DELETE USER
+// E. BITLABS S2S WEBHOOK (Survey Paisa Receiver)
+app.get('/bitlabs-webhook', async (req, res) => {
+    const { uid, val, tx } = req.query; 
+
+    console.log(`🔔 BITLABS ALERT: Survey done! User: ${uid} | Reward: ₹${val} | TX: ${tx}`);
+
+    if (!uid || !val) {
+        return res.status(400).send("Missing parameters");
+    }
+
+    try {
+        const user = await User.findOne({ deviceId: uid });
+        
+        if (!user) {
+            console.log(`❌ ERROR: User ${uid} not found in database.`);
+            return res.status(404).send("User not found");
+        }
+
+        const rewardAmount = parseFloat(val);
+        user.balance += rewardAmount;
+        await user.save();
+
+        console.log(`✅ SUCCESS: ₹${rewardAmount} added to ${uid}. New Balance: ₹${user.balance.toFixed(2)}`);
+
+        // BitLabs ko '200 OK' bhejna zaroori hai
+        res.status(200).send("OK");
+
+    } catch (error) {
+        console.error("Webhook Error:", error);
+        res.status(500).send("Internal Server Error");
+    }
+});
+
+// F. DELETE USER
 app.post('/deleteUser', async (req, res) => {
     const { deviceId } = req.body;
     try {
@@ -230,7 +284,7 @@ const adminAuth = (req, res, next) => {
     res.status(401).send('🛑 ACCESS DENIED! You are not the Admin.');
 };
 
-// 🔥 NAYA FIX: Smart File Finder Route
+// 🔥 Smart File Finder Route
 app.get(['/panel', '/admin', '/dashboard'], adminAuth, (req, res) => {
     const publicPath = path.join(__dirname, 'public', 'index.html');
     const rootPath = path.join(__dirname, 'index.html');
@@ -248,7 +302,7 @@ app.get(['/panel', '/admin', '/dashboard'], adminAuth, (req, res) => {
     }
 });
 
-// 2. Protect Admin APIs
+// Protect Admin APIs
 app.get('/admin/payouts', adminAuth, async (req, res) => {
     const payouts = await Payout.find({ status: "Pending" }).sort({ date: -1 });
     res.json(payouts);
