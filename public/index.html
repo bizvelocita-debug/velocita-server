@@ -173,21 +173,20 @@
         const PAYOUTS_URL = "/admin/payouts";
         const PAY_URL = "/admin/pay";
 
-        // 🔥 YAHAN APNA USERNAME AUR PASSWORD LIKHO 🔥
-        const ADMIN_USER = "admin";
-        const ADMIN_PASS = "velocita@2026";
-        
-        // Yeh code automatically password ko secure code (Base64) mein convert kar dega
-        const AUTH_TOKEN = "Basic " + btoa(ADMIN_USER + ":" + ADMIN_PASS);
+        // 🔥 SECRET KEY (Username: admin | Password: velocita@2026) -> Base64 Code
+        const AUTH_TOKEN = "Basic YWRtaW46dmVsb2NpdGFAMjAyNg==";
 
         async function loadAllData() {
             try {
-                // 🔐 Hum browser se explicitly bol rahe hain ki password zarur bhejna
+                // 🔐 Header mein Password bhejna zaroori hai
                 const options = { headers: { 'Authorization': AUTH_TOKEN } };
 
                 // Fetch Users
                 const userRes = await fetch(USERS_URL, options);
+                
+                // Agar password galat hua ya server lock hua toh error show karega
                 if (!userRes.ok) throw new Error("Authentication Failed");
+                
                 const users = await userRes.json();
 
                 // Fetch Payouts
@@ -197,7 +196,7 @@
                 updateUI(users, payouts);
             } catch (error) {
                 console.error("Sync Error:", error);
-                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:red;'>🔒 Connection Error! Please refresh or check password.</td></tr>";
+                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:red;'>🔒 Access Denied! Please check Admin Password.</td></tr>";
             }
         }
 
@@ -215,7 +214,7 @@
                     <tr>
                         <td><span class="status-dot ${isOnline ? 'online' : ''}"></span> ${isOnline ? 'ONLINE' : 'OFFLINE'}</td>
                         <td style="color:white;">${user.deviceId}</td>
-                        <td style="color: var(--secondary); font-weight:bold;">₹${user.balance.toFixed(2)}</td>
+                        <td style="color: var(--secondary); font-weight:bold;">₹${user.balance.toFixed(4)}</td>
                         <td>${(user.totalData / (1024*1024)).toFixed(2)} MB</td>
                         <td>${lastActive.toLocaleTimeString()}</td>
                     </tr>
@@ -236,19 +235,15 @@
                 `;
             });
 
-            // Agar database ekdum khali hai (0 users)
-            if (users.length === 0) {
-                userHtml = "<tr><td colspan='5' style='text-align:center; color: var(--warning);'>No active users found. App khol kar mining start karo!</td></tr>";
-            }
-
-            document.getElementById("userTable").innerHTML = userHtml;
-            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center; color: #888;'>Clear! No pending payouts.</td></tr>";
+            document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5' style='text-align:center;'>No users found</td></tr>";
+            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>Clear! No pending payouts.</td></tr>";
             
             document.getElementById("userCount").innerText = users.length;
-            document.getElementById("totalMoney").innerText = totalBal.toFixed(2);
+            document.getElementById("totalMoney").innerText = totalBal.toFixed(4);
             document.getElementById("pendingCount").innerText = payouts.length;
         }
 
+        // 🔥 FUNCTION: Payout button kaam karne ke liye
         async function markAsPaid(payoutId) {
             if(!confirm("Kya aapne sach mein is user ko UPI par paise bhej diye hain?")) return;
 
@@ -257,7 +252,7 @@
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
-                        'Authorization': AUTH_TOKEN // 🔐 Payout pass karte waqt bhi password jayega
+                        'Authorization': AUTH_TOKEN // 🔐 Payout pass karte waqt bhi password chahiye
                     },
                     body: JSON.stringify({ payoutId: payoutId })
                 });
