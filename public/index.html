@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Velocita Command Center</title>
+    <title>Velocita Command Center | God Mode</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary: #00ff41;
-            --secondary: #03a9f4;
+            --primary: #00ff41; /* Mining Green */
+            --secondary: #03a9f4; /* Wallet Blue */
+            --solar: #FFD700; /* Solar Gold */
+            --jackpot: #ff00ff; /* NEW: Jackpot Neon Purple */
             --bg: #050505;
             --panel: #0a0a0a;
             --border: #333;
@@ -35,7 +37,7 @@
         }
         .dashboard-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
             max-width: 1200px;
             margin: 0 auto 30px auto;
@@ -48,9 +50,15 @@
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
             text-align: center;
         }
-        .card h3 { color: #888; font-size: 14px; margin: 0 0 10px 0; }
+        .card.solar-card { border: 1px solid var(--solar); box-shadow: 0 0 15px rgba(255, 215, 0, 0.2); }
+        .card.jackpot-card { border: 1px solid var(--jackpot); box-shadow: 0 0 15px rgba(255, 0, 255, 0.2); }
+        
+        .card h3 { color: #888; font-size: 13px; margin: 0 0 10px 0; }
         .card .value { font-size: 32px; font-weight: bold; color: #fff; }
+        
         .money { color: var(--secondary) !important; text-shadow: 0 0 10px var(--secondary); }
+        .solar-money { color: var(--solar) !important; text-shadow: 0 0 10px var(--solar); }
+        .jackpot-color { color: var(--jackpot) !important; text-shadow: 0 0 10px var(--jackpot); }
 
         .section-title {
             max-width: 1200px;
@@ -60,6 +68,8 @@
             border-left: 4px solid var(--primary);
             padding-left: 10px;
         }
+        .section-title.solar-title { color: var(--solar); border-color: var(--solar); }
+        .section-title.jackpot-title { color: var(--jackpot); border-color: var(--jackpot); text-shadow: 0 0 10px var(--jackpot); }
 
         .table-container {
             max-width: 1200px;
@@ -69,50 +79,35 @@
             overflow-x: auto;
         }
         table { width: 100%; border-collapse: collapse; min-width: 800px; }
-        th {
-            background: #111;
-            color: var(--primary);
-            padding: 15px;
-            text-align: left;
-            border-bottom: 2px solid var(--primary);
-        }
+        th { background: #111; color: var(--primary); padding: 15px; text-align: left; border-bottom: 2px solid var(--primary); }
+        .solar-table th { color: var(--solar); border-bottom: 2px solid var(--solar); }
         td { padding: 15px; border-bottom: 1px solid #222; color: #ccc; }
         tr:hover { background-color: rgba(0, 255, 65, 0.05); }
 
         .status-dot { height: 10px; width: 10px; background-color: #555; border-radius: 50%; display: inline-block; margin-right: 8px; }
         .online { background-color: var(--primary); box-shadow: 0 0 8px var(--primary); }
         
-        .payout-btn {
-            background: var(--primary);
-            color: black;
-            border: none;
-            padding: 8px 12px;
-            cursor: pointer;
-            font-weight: bold;
-            font-family: 'Orbitron', sans-serif;
-            font-size: 12px;
-            border-radius: 3px;
-            transition: all 0.3s;
-        }
+        .btn { border: none; padding: 8px 12px; cursor: pointer; font-weight: bold; font-family: 'Orbitron', sans-serif; font-size: 12px; border-radius: 3px; transition: all 0.3s; }
+        .payout-btn { background: var(--primary); color: black; }
         .payout-btn:hover { background: #fff; box-shadow: 0 0 10px #fff; }
+        .verify-btn { background: var(--secondary); color: white; margin-right: 5px;}
+        .solar-pay-btn { background: var(--solar); color: black; }
+        
+        /* New Form Inputs */
+        .q-form { padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .q-form input, .q-form select { background: #000; border: 1px solid #333; color: white; padding: 12px; font-family: 'Roboto Mono'; width: 100%; box-sizing: border-box; }
+        .q-form input:focus, .q-form select:focus { border-color: var(--jackpot); outline: none; }
+        .q-form .full-width { grid-column: span 2; }
+        .submit-q-btn { background: var(--jackpot); color: white; padding: 15px; font-size: 16px; margin-top: 10px; width: 100%; }
+        .submit-q-btn:hover { background: #fff; color: var(--jackpot); box-shadow: 0 0 15px var(--jackpot); }
 
-        .refresh-btn {
-            display: block;
-            margin: 20px auto;
-            background: transparent;
-            color: var(--primary);
-            border: 2px solid var(--primary);
-            padding: 10px 30px;
-            font-family: 'Orbitron', sans-serif;
-            cursor: pointer;
-            text-transform: uppercase;
-        }
+        .refresh-btn { display: block; margin: 20px auto; background: transparent; color: var(--primary); border: 2px solid var(--primary); padding: 10px 30px; font-family: 'Orbitron', sans-serif; cursor: pointer; text-transform: uppercase; }
         .refresh-btn:hover { background: var(--primary); color: #000; box-shadow: 0 0 20px var(--primary); }
     </style>
 </head>
 <body>
 
-    <h1>🚀 VELOCITA COMMAND CENTER <span style="font-size:12px; vertical-align:middle; border:1px solid var(--primary); padding:2px 5px; border-radius:3px;">ROOT</span></h1>
+    <h1>🚀 VELOCITA COMMAND CENTER <span style="font-size:12px; vertical-align:middle; border:1px solid var(--primary); padding:2px 5px; border-radius:3px;">GOD MODE</span></h1>
 
     <div class="dashboard-grid">
         <div class="card">
@@ -120,27 +115,74 @@
             <div class="value" id="userCount">0</div>
         </div>
         <div class="card">
-            <h3>NETWORK REVENUE (LIABILITIES)</h3>
+            <h3>NETWORK LIABILITIES</h3>
             <div class="value money">₹<span id="totalMoney">0.00</span></div>
         </div>
-        <div class="card">
-            <h3>PENDING PAYOUTS</h3>
-            <div class="value" style="color: var(--warning)" id="pendingCount">0</div>
+        <div class="card solar-card">
+            <h3>☀️ PENDING SOLAR</h3>
+            <div class="value solar-money" id="solarCount">0</div>
+        </div>
+        <div class="card jackpot-card">
+            <h3>🎟️ GOLDEN PASSES (TODAY)</h3>
+            <div class="value jackpot-color" id="passCount">0</div>
+            <p style="font-size:12px; color:#888; margin-top:10px;">Est. Prize Pool: <strong style="color:var(--jackpot);">₹<span id="estPool">0</span></strong></p>
         </div>
     </div>
 
     <button class="refresh-btn" onclick="loadAllData()">🔄 SYNC GLOBAL DATA</button>
 
-    <div class="section-title">💸 PENDING WITHDRAWALS</div>
+    <div class="section-title jackpot-title">🔮 THE VAULT: ADD NEW LIVE QUESTION</div>
     <div class="table-container">
+        <div class="q-form">
+            <div class="full-width">
+                <label style="color:#888; font-size:12px;">Question (English):</label>
+                <input type="text" id="q_en" placeholder="e.g. Which planet is known as the Red Planet?">
+            </div>
+            <div><label style="color:#888; font-size:12px;">Option A:</label><input type="text" id="opt_a" placeholder="Earth"></div>
+            <div><label style="color:#888; font-size:12px;">Option B:</label><input type="text" id="opt_b" placeholder="Mars"></div>
+            <div><label style="color:#888; font-size:12px;">Option C:</label><input type="text" id="opt_c" placeholder="Jupiter"></div>
+            <div><label style="color:#888; font-size:12px;">Option D:</label><input type="text" id="opt_d" placeholder="Venus"></div>
+            
+            <div class="full-width" style="display:flex; gap:15px; align-items:flex-end;">
+                <div style="flex:1;">
+                    <label style="color:var(--jackpot); font-weight:bold; font-size:14px;">Secret Correct Answer:</label>
+                    <select id="correct_ans">
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        <option value="D">D</option>
+                    </select>
+                </div>
+                <button class="btn submit-q-btn" style="flex:2;" onclick="submitQuestion()">💾 ADD TO VAULT (Zero Repeat)</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-title solar-title">☀️ SOLAR MASTER CONTROL (Auto-Pay ₹1500)</div>
+    <div class="table-container solar-table">
         <table>
             <thead>
                 <tr>
                     <th>DATE</th>
-                    <th>USER EMAIL</th>
-                    <th>AMOUNT</th>
-                    <th>UPI ID / DETAILS</th>
+                    <th>SUBMITTED BY</th>
+                    <th>CUSTOMER INFO</th>
+                    <th>CITY & BILL</th>
+                    <th>STATUS</th>
                     <th>ACTION</th>
+                </tr>
+            </thead>
+            <tbody id="solarTable">
+                <tr><td colspan="6" style="text-align:center;">Scanning solar leads...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section-title">💸 PENDING MINING WITHDRAWALS</div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>DATE</th><th>USER EMAIL</th><th>AMOUNT</th><th>UPI ID / DETAILS</th><th>ACTION</th>
                 </tr>
             </thead>
             <tbody id="payoutTable">
@@ -154,11 +196,7 @@
         <table>
             <thead>
                 <tr>
-                    <th>STATUS</th>
-                    <th>DEVICE ID (EMAIL)</th>
-                    <th>BALANCE</th>
-                    <th>TOTAL DATA</th>
-                    <th>LAST PING</th>
+                    <th>STATUS</th><th>DEVICE ID (EMAIL)</th><th>BALANCE</th><th>METER (₹20)</th><th>LAST PING</th>
                 </tr>
             </thead>
             <tbody id="userTable">
@@ -172,105 +210,140 @@
         const USERS_URL = "/admin/users";
         const PAYOUTS_URL = "/admin/payouts";
         const PAY_URL = "/admin/pay";
+        const SOLAR_LEADS_URL = "/admin/solar-leads";
+        const SOLAR_UPDATE_URL = "/admin/update-solar-lead";
+        const ADD_QUESTION_URL = "/admin/add-question"; // 🔥 NEW ENDPOINT
 
-        // 🔥 SECRET KEY (Username: admin | Password: velocita@2026) -> Base64 Code
         const AUTH_TOKEN = "Basic YWRtaW46dmVsb2NpdGFAMjAyNg==";
 
         async function loadAllData() {
             try {
-                // 🔐 Header mein Password bhejna zaroori hai
                 const options = { headers: { 'Authorization': AUTH_TOKEN } };
 
-                // Fetch Users
                 const userRes = await fetch(USERS_URL, options);
-                
-                // Agar password galat hua ya server lock hua toh error show karega
-                if (!userRes.ok) throw new Error("Authentication Failed");
-                
+                if (!userRes.ok) throw new Error("Auth Failed");
                 const users = await userRes.json();
 
-                // Fetch Payouts
                 const payoutRes = await fetch(PAYOUTS_URL, options);
                 const payouts = await payoutRes.json();
 
-                updateUI(users, payouts);
+                const solarRes = await fetch(SOLAR_LEADS_URL, options);
+                const solarLeads = await solarRes.json();
+
+                updateUI(users, payouts, solarLeads);
             } catch (error) {
                 console.error("Sync Error:", error);
-                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:red;'>🔒 Access Denied! Please check Admin Password.</td></tr>";
+                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:red;'>🔒 Access Denied!</td></tr>";
             }
         }
 
-        function updateUI(users, payouts) {
+        function updateUI(users, payouts, solarLeads) {
             let userHtml = "";
             let totalBal = 0;
+            let goldenPassCount = 0; // 🔥 Jackpot Tracker
             
-            // Render User Table
+            // Render User Table & Logic
             users.forEach(user => {
                 totalBal += user.balance;
+                if(user.goldenPassUnlocked) goldenPassCount++; // Count active passes
+
                 const lastActive = new Date(user.lastActive);
-                const isOnline = (new Date() - lastActive) / 1000 / 60 < 5; // Online if pinged in last 5 mins
+                const isOnline = (new Date() - lastActive) / 1000 / 60 < 5; 
+
+                // Check meter status for UI
+                let meterColor = user.goldenPassUnlocked ? "var(--jackpot)" : "#ccc";
+                let meterText = user.goldenPassUnlocked ? "🎟️ UNLOCKED" : `₹${(user.dailyTaskMeter || 0).toFixed(2)}`;
 
                 userHtml += `
                     <tr>
                         <td><span class="status-dot ${isOnline ? 'online' : ''}"></span> ${isOnline ? 'ONLINE' : 'OFFLINE'}</td>
                         <td style="color:white;">${user.deviceId}</td>
                         <td style="color: var(--secondary); font-weight:bold;">₹${user.balance.toFixed(4)}</td>
-                        <td>${(user.totalData / (1024*1024)).toFixed(2)} MB</td>
+                        <td style="color: ${meterColor}; font-weight:bold;">${meterText}</td>
                         <td>${lastActive.toLocaleTimeString()}</td>
                     </tr>
                 `;
             });
 
-            // Render Payout Table
-            let payoutHtml = "";
-            payouts.forEach(p => {
-                payoutHtml += `
-                    <tr>
-                        <td>${new Date(p.date).toLocaleDateString()}</td>
-                        <td>${p.deviceId}</td>
-                        <td style="color: #00ff41; font-weight:bold;">₹${p.amount.toFixed(2)}</td>
-                        <td style="color: var(--warning);">${p.details}</td>
-                        <td><button class="payout-btn" onclick="markAsPaid('${p._id}')">MARK PAID</button></td>
-                    </tr>
-                `;
-            });
-
-            document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5' style='text-align:center;'>No users found</td></tr>";
-            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>Clear! No pending payouts.</td></tr>";
-            
+            // Update Stats
             document.getElementById("userCount").innerText = users.length;
             document.getElementById("totalMoney").innerText = totalBal.toFixed(4);
+            document.getElementById("passCount").innerText = goldenPassCount;
+            document.getElementById("estPool").innerText = (goldenPassCount * 2).toFixed(2); // Dynamic Pool Math (₹2 per user)
+            document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5'>No users</td></tr>";
+
+            // (Your existing Payout & Solar HTML loops remain exactly the same...)
+            // 2. Render Payouts
+            let payoutHtml = "";
+            payouts.forEach(p => {
+                payoutHtml += `<tr><td>${new Date(p.date).toLocaleDateString()}</td><td>${p.deviceId}</td><td style="color: #00ff41; font-weight:bold;">₹${p.amount.toFixed(2)}</td><td style="color: var(--warning);">${p.details}</td><td><button class="btn payout-btn" onclick="markAsPaid('${p._id}')">MARK PAID</button></td></tr>`;
+            });
+            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>Clear! No pending payouts.</td></tr>";
+
+            // 3. Render Solar Leads
+            let solarHtml = ""; let pendingSolarCount = 0;
+            solarLeads.forEach(lead => {
+                if (lead.status !== "Paid") {
+                    pendingSolarCount++;
+                    let statusBadge = lead.status === 'Pending' ? `<span style="color:var(--warning)">🟡 Pending</span>` : `<span style="color:var(--secondary)">🔵 Verified</span>`;
+                    solarHtml += `<tr><td>${new Date(lead.date).toLocaleDateString()}</td><td style="color:white; font-size:12px;">${lead.submittedBy}</td><td><strong style="color:white;">${lead.customerName}</strong><br><span style="color:var(--solar)">📞 ${lead.mobileNumber}</span></td><td>${lead.city} <br> <span style="color:#888; font-size:12px;">Bill: ${lead.bill}</span></td><td>${statusBadge}</td><td>${lead.status === 'Pending' ? `<button class="btn verify-btn" onclick="updateSolarStatus('${lead._id}', 'Verified')">Verify</button>` : ''}<button class="btn solar-pay-btn" onclick="updateSolarStatus('${lead._id}', 'Paid')">💰 PAY ₹1500</button></td></tr>`;
+                }
+            });
+            document.getElementById("solarTable").innerHTML = solarHtml || "<tr><td colspan='6' style='text-align:center;'>No pending solar leads right now.</td></tr>";
             document.getElementById("pendingCount").innerText = payouts.length;
+            document.getElementById("solarCount").innerText = pendingSolarCount;
         }
 
-        // 🔥 FUNCTION: Payout button kaam karne ke liye
-        async function markAsPaid(payoutId) {
-            if(!confirm("Kya aapne sach mein is user ko UPI par paise bhej diye hain?")) return;
+        // 🔥 NEW: SUBMIT QUESTION TO VAULT
+        async function submitQuestion() {
+            const q_en = document.getElementById("q_en").value.trim();
+            const opt_a = document.getElementById("opt_a").value.trim();
+            const opt_b = document.getElementById("opt_b").value.trim();
+            const opt_c = document.getElementById("opt_c").value.trim();
+            const opt_d = document.getElementById("opt_d").value.trim();
+            const correct_ans = document.getElementById("correct_ans").value;
+
+            if(!q_en || !opt_a || !opt_b || !opt_c || !opt_d) {
+                alert("⚠️ Please fill all question fields!"); return;
+            }
+
+            const payload = {
+                question_en: q_en,
+                options_en: { "A": opt_a, "B": opt_b, "C": opt_c, "D": opt_d },
+                correctAnswer: correct_ans
+            };
 
             try {
-                const response = await fetch(PAY_URL, {
+                const response = await fetch(ADD_QUESTION_URL, {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': AUTH_TOKEN // 🔐 Payout pass karte waqt bhi password chahiye
-                    },
-                    body: JSON.stringify({ payoutId: payoutId })
+                    headers: { 'Content-Type': 'application/json', 'Authorization': AUTH_TOKEN },
+                    body: JSON.stringify(payload)
                 });
-
-                if (response.ok) {
-                    alert("✅ Payout Marked as Paid!");
-                    loadAllData(); // Table ko turant update (refresh) kar dega
-                } else {
-                    alert("❌ Error marking payout.");
-                }
-            } catch (e) {
-                alert("❌ Connection Error.");
-            }
+                
+                if(response.ok) {
+                    alert("✅ Question Saved to Vault! (It will never be repeated)");
+                    // Clear inputs
+                    document.getElementById("q_en").value = "";
+                    document.getElementById("opt_a").value = ""; document.getElementById("opt_b").value = ""; document.getElementById("opt_c").value = ""; document.getElementById("opt_d").value = "";
+                } else { alert("❌ Failed to save question."); }
+            } catch(e) { alert("❌ Connection Error."); }
         }
 
-        // Initial Load
+        async function markAsPaid(payoutId) {
+            if(!confirm("Are you sure?")) return;
+            await fetch(PAY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': AUTH_TOKEN }, body: JSON.stringify({ payoutId: payoutId }) });
+            loadAllData();
+        }
+
+        async function updateSolarStatus(leadId, newStatus) {
+            let msg = newStatus === 'Paid' ? "⚠️ WARNING: Auto-Pay ₹1500 to User?" : "Verify Site?";
+            if(!confirm(msg)) return;
+            await fetch(SOLAR_UPDATE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': AUTH_TOKEN }, body: JSON.stringify({ leadId: leadId, newStatus: newStatus }) });
+            loadAllData();
+        }
+
         loadAllData();
-        setInterval(loadAllData, 15000); // Auto sync every 15s
+        setInterval(loadAllData, 15000); 
     </script>
 </body>
 </html>
