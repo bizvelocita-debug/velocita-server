@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs'); 
+const cron = require('node-cron'); // 🔥 NEW: Midnight Sweeper Robot
 
 const app = express();
 app.use(cors());
@@ -19,9 +20,9 @@ mongoose.connect(MONGO_URI)
 // 2. DATA MODELS
 const userSchema = new mongoose.Schema({
     deviceId: { type: String, required: true, unique: true }, 
-    hardwareId: { type: String, default: null },              
+    hardwareId: { type: String, default: null },               
     hasClaimedReferral: { type: Boolean, default: false },    
-    balance: { type: Number, default: 0.00 }, 
+    balance: { type: Number, default: 0.00 }, // Dabba 1: Main Safe Wallet
     totalData: { type: Number, default: 0 },
     upiId: { type: String, default: "" },
     referralCode: { type: String, unique: true }, 
@@ -31,7 +32,12 @@ const userSchema = new mongoose.Schema({
     
     // 🛡️ Anti-Hack: Daily Limit Trackers for Tasks
     dailyTaskEarnings: { type: Number, default: 0 },
-    lastTaskDate: { type: String, default: "" }
+    lastTaskDate: { type: String, default: "" },
+
+    // 🔥 NEW: THE 9 PM JACKPOT ECONOMY
+    dailyTaskMeter: { type: Number, default: 0.00 }, // Dabba 2: (₹0 to ₹20 Target)
+    goldenPassUnlocked: { type: Boolean, default: false }, // Ticket Status
+    isEliminatedToday: { type: Boolean, default: false } // Live Game Status
 });
 const User = mongoose.model('User', userSchema);
 
@@ -45,12 +51,65 @@ const payoutSchema = new mongoose.Schema({
 });
 const Payout = mongoose.model('Payout', payoutSchema);
 
+// ☀️ SOLAR LEAD MODEL
+const solarLeadSchema = new mongoose.Schema({
+    submittedBy: { type: String, required: true }, 
+    customerName: { type: String, required: true },
+    mobileNumber: { type: String, required: true, unique: true }, 
+    city: { type: String, required: true },
+    bill: { type: String, required: true },
+    status: { type: String, default: "Pending" }, 
+    date: { type: Date, default: Date.now }
+});
+const SolarLead = mongoose.model('SolarLead', solarLeadSchema);
+
+// ❓ NEW: LIVE ARENA QUESTIONS MODEL (Zero Repeat & Multi-Language)
+const liveQuestionSchema = new mongoose.Schema({
+    question_en: { type: String, required: true },
+    question_hi: { type: String, default: "" },
+    question_mr: { type: String, default: "" },
+    options_en: { type: Object, required: true }, // { A: "Ans 1", B: "Ans 2"... }
+    options_hi: { type: Object, default: {} },
+    options_mr: { type: Object, default: {} },
+    correctAnswer: { type: String, required: true }, // "A", "B", "C" or "D"
+    isUsed: { type: Boolean, default: false }, // Zero-Repeat Logic Lock
+    usedDate: { type: Date, default: null }
+});
+const LiveQuestion = mongoose.model('LiveQuestion', liveQuestionSchema);
+
+// ==========================================
+// 🤖 THE ROBOTS (AUTOMATION)
+// ==========================================
+
+// 🕛 MIDNIGHT SWEEPER (Runs daily at 12:00 AM IST)
+cron.schedule('0 0 * * *', async () => {
+    console.log("🧹 MIDNIGHT SWEEPER: Resetting Daily Meters & Locking Golden Passes...");
+    try {
+        await User.updateMany(
+            {}, 
+            { 
+                $set: { 
+                    dailyTaskMeter: 0, 
+                    goldenPassUnlocked: false,
+                    isEliminatedToday: false 
+                } 
+            }
+        );
+        console.log("✅ All passes locked and meters reset for the new day!");
+    } catch (e) {
+        console.error("❌ Midnight Sweeper Error:", e);
+    }
+}, {
+    timezone: "Asia/Kolkata"
+});
+
+
 // ==========================================
 // 🔓 PUBLIC ROUTES (For Flutter App Only)
 // ==========================================
 
 app.get('/', (req, res) => {
-    res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳 (With Anti-Hack Guard)");
+    res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳 (With Mega Jackpot Engine)");
 });
 
 // A. PING (Secured Mining Loop)
@@ -73,12 +132,12 @@ app.post('/ping', async (req, res) => {
         const now = new Date();
         const diff = (now - new Date(user.lastActive)) / 1000;
         
-        // Mining Logic (Background Ping)
+        // Mining Logic
         if (diff > 8) { 
             const earning = 0.01; 
             user.balance += earning;
 
-            // Referral Earning Logic
+            // Referral Earning
             if (user.referredBy) {
                 const upline = await User.findOne({ deviceId: user.referredBy });
                 if (upline) {
@@ -95,27 +154,26 @@ app.post('/ping', async (req, res) => {
         res.json({ 
             status: "active", 
             balance: user.balance.toFixed(4), 
-            upiId: user.upiId 
+            upiId: user.upiId,
+            // Send Daily Target Info to Flutter UI
+            dailyTaskMeter: user.dailyTaskMeter,
+            isPassUnlocked: user.goldenPassUnlocked
         });
     } catch (e) {
-        console.error(e);
         res.status(500).json({ error: "Server Error" });
     }
 });
 
-// 🔥 B. UPDATE BALANCE API (For Quiz, Captcha, News - HIGH SECURITY)
+// 🔥 B. UPDATE BALANCE API (Dual Wallet Routing)
 app.post('/updateBalance', async (req, res) => {
     const { deviceId, amount, reason } = req.body;
-    
     if (!deviceId || amount == null) return res.status(400).json({ error: "Missing data" });
 
     try {
         const user = await User.findOne({ deviceId });
         if (!user) return res.status(404).json({ error: "User not found" });
 
-        const today = new Date().toISOString().substring(0, 10); // e.g., 2024-05-20
-
-        // Reset daily limit if it's a new day
+        const today = new Date().toISOString().substring(0, 10); 
         if (user.lastTaskDate !== today) {
             user.dailyTaskEarnings = 0;
             user.lastTaskDate = today;
@@ -123,29 +181,38 @@ app.post('/updateBalance', async (req, res) => {
 
         const requestedAmount = parseFloat(amount);
 
-        // 🛡️ ANTI-HACK: Prevent single abnormal requests (e.g. Someone trying to add ₹500 at once via Postman)
         if (requestedAmount > 2.0) {
-            console.log(`🚨 HACK ATTEMPT: ${deviceId} tried to add ₹${requestedAmount} for ${reason}`);
+            console.log(`🚨 HACK ATTEMPT: ${deviceId} tried to add ₹${requestedAmount}`);
             return res.status(403).json({ error: "Suspicious activity detected!" });
         }
-
-        // 🛡️ ANTI-HACK: Daily Cap (Max ₹15 per day from side tasks)
         if (user.dailyTaskEarnings + requestedAmount > 15.0) {
-            console.log(`⚠️ DAILY LIMIT REACHED: ${deviceId} exceeded ₹15 task limit.`);
             return res.status(429).json({ error: "Daily task limit reached." });
         }
 
-        // ✅ If safe, add money
+        // 💰 Dabba 1: Main Balance Hamesha Badhega
         user.balance += requestedAmount;
         user.dailyTaskEarnings += requestedAmount;
-        
+
+        // 🎟️ Dabba 2: Sirf Tasks/Offers se Daily Meter badhega
+        if (reason.includes("Task") || reason.includes("Survey") || reason.includes("Scratch")) {
+            user.dailyTaskMeter += requestedAmount;
+
+            // 🔓 Unlock Golden Pass if target reached (₹20)
+            if (user.dailyTaskMeter >= 20.0 && !user.goldenPassUnlocked) {
+                user.goldenPassUnlocked = true;
+                console.log(`🎟️ GOLDEN PASS UNLOCKED for ${deviceId}!`);
+            }
+        }
+
         await user.save();
 
-        console.log(`💰 TASK EARNED: ${deviceId} got ₹${requestedAmount} for [${reason}]. New Bal: ₹${user.balance.toFixed(4)}`);
-        res.json({ success: true, newBalance: user.balance });
-
+        res.json({ 
+            success: true, 
+            newBalance: user.balance,
+            dailyMeter: user.dailyTaskMeter,
+            isUnlocked: user.goldenPassUnlocked 
+        });
     } catch (e) {
-        console.error("Balance Update Error:", e);
         res.status(500).json({ error: "Server Error" });
     }
 });
@@ -161,23 +228,47 @@ app.post('/withdraw', async (req, res) => {
             return res.status(400).json({ message: "Minimum ₹50 required." });
         }
 
-        const newPayout = new Payout({
-            deviceId,
-            amount: user.balance,
-            method,
-            details
-        });
+        const newPayout = new Payout({ deviceId, amount: user.balance, method, details });
         await newPayout.save();
 
         user.upiId = details;
         user.balance = 0; 
         await user.save();
 
-        console.log(`💸 PAYOUT: ₹${newPayout.amount} -> ${deviceId}`);
         res.json({ status: "success", message: "Request Sent!" });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ☀️ SUBMIT SOLAR LEAD
+app.post('/submit-solar-lead', async (req, res) => {
+    const { deviceId, customerName, mobileNumber, city, bill } = req.body;
+    try {
+        const existingLead = await SolarLead.findOne({ mobileNumber });
+        if (existingLead) return res.status(400).json({ error: "Duplicate number!" });
+
+        const newLead = new SolarLead({ submittedBy: deviceId, customerName, mobileNumber, city, bill });
+        await newLead.save();
+
+        res.json({ success: true, message: "Lead submitted successfully!" });
+    } catch (e) { res.status(500).json({ error: "Server Error" }); }
+});
+
+// ☀️ GET MY SOLAR LEADS
+app.get('/my-solar-leads', async (req, res) => {
+    const { deviceId } = req.query;
+    try {
+        const leads = await SolarLead.find({ submittedBy: deviceId }).sort({ date: -1 });
+        res.json(leads);
+    } catch (e) { res.status(500).json({ error: "Server Error" }); }
+});
+
+// 💳 GET MY TRANSACTION HISTORY
+app.get('/my-transactions', async (req, res) => {
+    const { deviceId } = req.query;
+    try {
+        const payouts = await Payout.find({ deviceId }).sort({ date: -1 });
+        res.json(payouts);
+    } catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
 // D. BIND REFERRAL
@@ -187,80 +278,24 @@ app.post('/bindReferral', async (req, res) => {
         if (hardwareId && hardwareId !== "unknown_device") {
             const existingDevice = await User.findOne({ hardwareId: hardwareId, hasClaimedReferral: true });
             if (existingDevice && existingDevice.deviceId !== deviceId) {
-                console.log(`🚨 FRAUD BLOCKED: Phone ${hardwareId} trying multiple emails.`);
-                return res.status(400).json({ error: "Fraud detected: Device already used a referral code!" });
+                return res.status(400).json({ error: "Fraud detected!" });
             }
         }
 
         let user = await User.findOne({ deviceId });
-        if (!user) return res.status(404).json({ error: "User not found" });
-        if (user.referredBy || user.hasClaimedReferral) return res.status(400).json({ error: "Already claimed referral" });
+        if (!user || user.referredBy || user.hasClaimedReferral) return res.status(400).json({ error: "Invalid/Already claimed" });
 
         const referrer = await User.findOne({ referralCode: promoCode });
-        if (!referrer || referrer.deviceId === deviceId) {
-            return res.status(400).json({ error: "Invalid Code or Self-Referral" });
-        }
+        if (!referrer || referrer.deviceId === deviceId) return res.status(400).json({ error: "Invalid Code" });
 
         referrer.balance += 10.00;
         await referrer.save();
 
-        user.referredBy = referrer.deviceId;
-        user.hardwareId = hardwareId; 
-        user.hasClaimedReferral = true; 
+        user.referredBy = referrer.deviceId; user.hardwareId = hardwareId; user.hasClaimedReferral = true; 
         await user.save();
 
-        console.log(`🎉 REFERRAL SUCCESS: ₹10 added to ${referrer.deviceId}`);
-        res.json({ success: true, message: "Referral Applied & Bonus Given!" });
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// E. BITLABS S2S WEBHOOK (Survey Paisa Receiver)
-app.get('/bitlabs-webhook', async (req, res) => {
-    const { uid, val, tx } = req.query; 
-
-    console.log(`🔔 BITLABS ALERT: Survey done! User: ${uid} | Reward: ₹${val} | TX: ${tx}`);
-
-    if (!uid || !val) {
-        return res.status(400).send("Missing parameters");
-    }
-
-    try {
-        const user = await User.findOne({ deviceId: uid });
-        
-        if (!user) {
-            console.log(`❌ ERROR: User ${uid} not found in database.`);
-            return res.status(404).send("User not found");
-        }
-
-        const rewardAmount = parseFloat(val);
-        user.balance += rewardAmount;
-        await user.save();
-
-        console.log(`✅ SUCCESS: ₹${rewardAmount} added to ${uid}. New Balance: ₹${user.balance.toFixed(2)}`);
-
-        // BitLabs ko '200 OK' bhejna zaroori hai
-        res.status(200).send("OK");
-
-    } catch (error) {
-        console.error("Webhook Error:", error);
-        res.status(500).send("Internal Server Error");
-    }
-});
-
-// F. DELETE USER
-app.post('/deleteUser', async (req, res) => {
-    const { deviceId } = req.body;
-    try {
-        await User.deleteOne({ deviceId });
-        await Payout.deleteMany({ deviceId }); 
-        console.log(`🗑️ DELETED USER: ${deviceId}`);
-        res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+        res.json({ success: true, message: "Referral Applied!" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 
@@ -272,7 +307,6 @@ const adminAuth = (req, res, next) => {
     const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
     const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
 
-    // 👇 Admin Username aur Password
     const ADMIN_USER = "admin";
     const ADMIN_PASS = "velocita@2026"; 
 
@@ -284,25 +318,15 @@ const adminAuth = (req, res, next) => {
     res.status(401).send('🛑 ACCESS DENIED! You are not the Admin.');
 };
 
-// 🔥 Smart File Finder Route
 app.get(['/panel', '/admin', '/dashboard'], adminAuth, (req, res) => {
     const publicPath = path.join(__dirname, 'public', 'index.html');
     const rootPath = path.join(__dirname, 'index.html');
 
-    if (fs.existsSync(publicPath)) {
-        res.sendFile(publicPath);
-    } else if (fs.existsSync(rootPath)) {
-        res.sendFile(rootPath);
-    } else {
-        res.status(404).send(`
-            <h1 style="color: red; text-align: center; margin-top: 50px;">🚨 Error 404: HTML File Missing!</h1>
-            <h3 style="text-align: center;">Bhai, server par 'index.html' file nahi mil rahi hai.</h3>
-            <p style="text-align: center;">Please check karo ki aapne index.html file ko Render ya Github par sahi se upload kiya hai ya nahi.</p>
-        `);
-    }
+    if (fs.existsSync(publicPath)) { res.sendFile(publicPath); } 
+    else if (fs.existsSync(rootPath)) { res.sendFile(rootPath); } 
+    else { res.status(404).send(`<h1 style="color: red; text-align: center; margin-top: 50px;">🚨 Error 404: HTML File Missing!</h1>`); }
 });
 
-// Protect Admin APIs
 app.get('/admin/payouts', adminAuth, async (req, res) => {
     const payouts = await Payout.find({ status: "Pending" }).sort({ date: -1 });
     res.json(payouts);
@@ -317,6 +341,53 @@ app.post('/admin/pay', adminAuth, async (req, res) => {
     const { payoutId } = req.body;
     await Payout.findByIdAndUpdate(payoutId, { status: "Paid" });
     res.json({ success: true });
+});
+
+// ☀️ ADMIN SOLAR LEADS MANAGEMENT
+app.get('/admin/solar-leads', adminAuth, async (req, res) => {
+    try {
+        const leads = await SolarLead.find().sort({ date: -1 });
+        res.json(leads);
+    } catch (e) { res.status(500).json({ error: "Server Error" }); }
+});
+
+// 💰 ADMIN UPDATE LEAD STATUS & AUTO-PAY ₹1500
+app.post('/admin/update-solar-lead', adminAuth, async (req, res) => {
+    const { leadId, newStatus } = req.body;
+    try {
+        const lead = await SolarLead.findById(leadId);
+        if (!lead) return res.status(404).json({ error: "Lead not found" });
+
+        if (lead.status === "Paid") return res.status(400).json({ error: "Lead is already Paid." });
+
+        lead.status = newStatus;
+        await lead.save();
+
+        // 🎉 Auto-Pay ₹1500 directly into Main Wallet
+        if (newStatus === "Paid") {
+            const user = await User.findOne({ deviceId: lead.submittedBy });
+            if (user) {
+                user.balance += 1500.00;
+                await user.save();
+                console.log(`🔥 SOLAR SUCCESS: ₹1500 added to ${user.deviceId}`);
+            }
+        }
+        res.json({ success: true, message: `Status updated to ${newStatus}` });
+    } catch (e) { res.status(500).json({ error: "Server Error" }); }
+});
+
+// ❓ NEW: ADMIN API TO ADD QUESTION TO THE VAULT
+app.post('/admin/add-question', adminAuth, async (req, res) => {
+    const { question_en, options_en, correctAnswer } = req.body;
+    try {
+        const newQuestion = new LiveQuestion({ question_en, options_en, correctAnswer });
+        await newQuestion.save();
+        console.log("🔮 NEW QUESTION ADDED TO VAULT!");
+        res.json({ success: true });
+    } catch (e) {
+        console.error("Error adding question:", e);
+        res.status(500).json({ error: "Server Error" });
+    }
 });
 
 // SERVER START
