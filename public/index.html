@@ -15,6 +15,7 @@
             --panel: #0a0a0a;
             --border: #333;
             --warning: #ffab00;
+            --danger: #ff1744;
         }
         body {
             background-color: var(--bg);
@@ -49,9 +50,11 @@
             border-radius: 5px;
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
             text-align: center;
+            position: relative;
         }
         .card.solar-card { border: 1px solid var(--solar); box-shadow: 0 0 15px rgba(255, 215, 0, 0.2); }
         .card.jackpot-card { border: 1px solid var(--jackpot); box-shadow: 0 0 15px rgba(255, 0, 255, 0.2); }
+        .card.payout-card { border: 1px solid var(--warning); box-shadow: 0 0 15px rgba(255, 171, 0, 0.2); }
         
         .card h3 { color: #888; font-size: 13px; margin: 0 0 10px 0; }
         .card .value { font-size: 32px; font-weight: bold; color: #fff; }
@@ -59,6 +62,7 @@
         .money { color: var(--secondary) !important; text-shadow: 0 0 10px var(--secondary); }
         .solar-money { color: var(--solar) !important; text-shadow: 0 0 10px var(--solar); }
         .jackpot-color { color: var(--jackpot) !important; text-shadow: 0 0 10px var(--jackpot); }
+        .payout-color { color: var(--warning) !important; text-shadow: 0 0 10px var(--warning); }
 
         .section-title {
             max-width: 1200px;
@@ -67,6 +71,9 @@
             font-family: 'Orbitron', sans-serif;
             border-left: 4px solid var(--primary);
             padding-left: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         .section-title.solar-title { color: var(--solar); border-color: var(--solar); }
         .section-title.jackpot-title { color: var(--jackpot); border-color: var(--jackpot); text-shadow: 0 0 10px var(--jackpot); }
@@ -118,6 +125,10 @@
             <h3>NETWORK LIABILITIES</h3>
             <div class="value money">₹<span id="totalMoney">0.00</span></div>
         </div>
+        <div class="card payout-card">
+            <h3>💸 PENDING PAYOUTS</h3>
+            <div class="value payout-color" id="pendingCount">0</div>
+        </div>
         <div class="card solar-card">
             <h3>☀️ PENDING SOLAR</h3>
             <div class="value solar-money" id="solarCount">0</div>
@@ -131,7 +142,9 @@
 
     <button class="refresh-btn" onclick="loadAllData()">🔄 SYNC GLOBAL DATA</button>
 
-    <div class="section-title jackpot-title">🔮 THE VAULT: ADD NEW LIVE QUESTION</div>
+    <div class="section-title jackpot-title">
+        🔮 THE VAULT: ADD NEW LIVE QUESTION
+    </div>
     <div class="table-container">
         <div class="q-form">
             <div class="full-width">
@@ -177,12 +190,14 @@
         </table>
     </div>
 
-    <div class="section-title">💸 PENDING MINING WITHDRAWALS</div>
+    <div class="section-title">
+        💸 WITHDRAWAL HISTORY
+    </div>
     <div class="table-container">
         <table>
             <thead>
                 <tr>
-                    <th>DATE</th><th>USER EMAIL</th><th>AMOUNT</th><th>UPI ID / DETAILS</th><th>ACTION</th>
+                    <th>DATE</th><th>USER EMAIL</th><th>AMOUNT</th><th>DETAILS</th><th>STATUS / ACTION</th>
                 </tr>
             </thead>
             <tbody id="payoutTable">
@@ -196,7 +211,7 @@
         <table>
             <thead>
                 <tr>
-                    <th>STATUS</th><th>DEVICE ID (EMAIL)</th><th>BALANCE</th><th>METER (₹20)</th><th>LAST PING</th>
+                    <th>STATUS</th><th>DEVICE ID (EMAIL)</th><th>BALANCE</th><th>METER (₹50)</th><th>LAST PING</th>
                 </tr>
             </thead>
             <tbody id="userTable">
@@ -208,17 +223,17 @@
     <script>
         // API Endpoints
         const USERS_URL = "/admin/users";
-        const PAYOUTS_URL = "/admin/payouts";
+        // 🔥 UPDATE: Changed to all-payouts to load full history
+        const PAYOUTS_URL = "/admin/all-payouts";
         const PAY_URL = "/admin/pay";
         const SOLAR_LEADS_URL = "/admin/solar-leads";
         const SOLAR_UPDATE_URL = "/admin/update-solar-lead";
-        const ADD_QUESTION_URL = "/admin/add-question"; // 🔥 NEW ENDPOINT
-
-        const AUTH_TOKEN = "Basic YWRtaW46dmVsb2NpdGFAMjAyNg==";
+        const ADD_QUESTION_URL = "/admin/add-question"; 
 
         async function loadAllData() {
             try {
-                const options = { headers: { 'Authorization': AUTH_TOKEN } };
+                // The browser will automatically attach the Basic Auth header after the first prompt.
+                const options = {}; 
 
                 const userRes = await fetch(USERS_URL, options);
                 if (!userRes.ok) throw new Error("Auth Failed");
@@ -240,17 +255,16 @@
         function updateUI(users, payouts, solarLeads) {
             let userHtml = "";
             let totalBal = 0;
-            let goldenPassCount = 0; // 🔥 Jackpot Tracker
+            let goldenPassCount = 0; 
             
             // Render User Table & Logic
             users.forEach(user => {
                 totalBal += user.balance;
-                if(user.goldenPassUnlocked) goldenPassCount++; // Count active passes
+                if(user.goldenPassUnlocked) goldenPassCount++; 
 
                 const lastActive = new Date(user.lastActive);
                 const isOnline = (new Date() - lastActive) / 1000 / 60 < 5; 
 
-                // Check meter status for UI
                 let meterColor = user.goldenPassUnlocked ? "var(--jackpot)" : "#ccc";
                 let meterText = user.goldenPassUnlocked ? "🎟️ UNLOCKED" : `₹${(user.dailyTaskMeter || 0).toFixed(2)}`;
 
@@ -269,18 +283,37 @@
             document.getElementById("userCount").innerText = users.length;
             document.getElementById("totalMoney").innerText = totalBal.toFixed(4);
             document.getElementById("passCount").innerText = goldenPassCount;
-            document.getElementById("estPool").innerText = (goldenPassCount * 2).toFixed(2); // Dynamic Pool Math (₹2 per user)
+            
+            // ✅ UPDATED: Math fix. 1 Winner = ₹50
+            document.getElementById("estPool").innerText = (goldenPassCount * 50).toFixed(2); 
+            
             document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5'>No users</td></tr>";
 
-            // (Your existing Payout & Solar HTML loops remain exactly the same...)
-            // 2. Render Payouts
+            // Render Payouts (With Auto Status Check)
             let payoutHtml = "";
+            let pendingPayouts = 0;
             payouts.forEach(p => {
-                payoutHtml += `<tr><td>${new Date(p.date).toLocaleDateString()}</td><td>${p.deviceId}</td><td style="color: #00ff41; font-weight:bold;">₹${p.amount.toFixed(2)}</td><td style="color: var(--warning);">${p.details}</td><td><button class="btn payout-btn" onclick="markAsPaid('${p._id}')">MARK PAID</button></td></tr>`;
-            });
-            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>Clear! No pending payouts.</td></tr>";
+                let isPaid = p.status === 'Paid';
+                if(!isPaid) pendingPayouts++;
 
-            // 3. Render Solar Leads
+                let actionHtml = isPaid 
+                    ? `<span style="color:var(--primary); font-weight:bold;">🟢 PAID</span>` 
+                    : `<button class="btn payout-btn" onclick="markAsPaid('${p._id}')">MARK PAID</button>`;
+
+                payoutHtml += `<tr>
+                    <td>${new Date(p.date).toLocaleDateString()}</td>
+                    <td style="color:white;">${p.deviceId}</td>
+                    <td style="color: #00ff41; font-weight:bold;">₹${p.amount.toFixed(2)}</td>
+                    <td style="color: var(--warning);">${p.details}</td>
+                    <td>${actionHtml}</td>
+                </tr>`;
+            });
+            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>No records found.</td></tr>";
+            
+            // 🔥 Count only pending ones for the top card
+            document.getElementById("pendingCount").innerText = pendingPayouts;
+
+            // Render Solar Leads
             let solarHtml = ""; let pendingSolarCount = 0;
             solarLeads.forEach(lead => {
                 if (lead.status !== "Paid") {
@@ -290,11 +323,9 @@
                 }
             });
             document.getElementById("solarTable").innerHTML = solarHtml || "<tr><td colspan='6' style='text-align:center;'>No pending solar leads right now.</td></tr>";
-            document.getElementById("pendingCount").innerText = payouts.length;
             document.getElementById("solarCount").innerText = pendingSolarCount;
         }
 
-        // 🔥 NEW: SUBMIT QUESTION TO VAULT
         async function submitQuestion() {
             const q_en = document.getElementById("q_en").value.trim();
             const opt_a = document.getElementById("opt_a").value.trim();
@@ -316,13 +347,12 @@
             try {
                 const response = await fetch(ADD_QUESTION_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': AUTH_TOKEN },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 
                 if(response.ok) {
                     alert("✅ Question Saved to Vault! (It will never be repeated)");
-                    // Clear inputs
                     document.getElementById("q_en").value = "";
                     document.getElementById("opt_a").value = ""; document.getElementById("opt_b").value = ""; document.getElementById("opt_c").value = ""; document.getElementById("opt_d").value = "";
                 } else { alert("❌ Failed to save question."); }
@@ -331,14 +361,14 @@
 
         async function markAsPaid(payoutId) {
             if(!confirm("Are you sure?")) return;
-            await fetch(PAY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': AUTH_TOKEN }, body: JSON.stringify({ payoutId: payoutId }) });
+            await fetch(PAY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payoutId: payoutId }) });
             loadAllData();
         }
 
         async function updateSolarStatus(leadId, newStatus) {
             let msg = newStatus === 'Paid' ? "⚠️ WARNING: Auto-Pay ₹1500 to User?" : "Verify Site?";
             if(!confirm(msg)) return;
-            await fetch(SOLAR_UPDATE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': AUTH_TOKEN }, body: JSON.stringify({ leadId: leadId, newStatus: newStatus }) });
+            await fetch(SOLAR_UPDATE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: leadId, newStatus: newStatus }) });
             loadAllData();
         }
 
