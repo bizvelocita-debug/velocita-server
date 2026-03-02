@@ -18,15 +18,16 @@ app.use(express.json());
 // ⚠️ CTO NOTE: You MUST download your Firebase Admin SDK JSON file and put it in the same folder, 
 // then rename it to "velocita-firebase-adminsdk.json"
 try {
-    const serviceAccount = require('./velocita-firebase-adminsdk.json');
+    // 🔥 NAYA CODE: Ab hum file se nahi, Render ki tijori se chaabi nikalenge!
+    const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+    
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      // Put your RTDB URL here:
-      databaseURL: "https://your-project-id.firebaseio.com" 
+      databaseURL: "https://velocita-app.firebaseio.com" // Apne Firebase ka real URL check kar lena ek baar
     });
     console.log("✅ FIREBASE RTDB CONNECTED (Live Arena Ready!)");
 } catch (e) {
-    console.error("❌ Firebase Admin SDK Missing! Live Arena will crash.", e);
+    console.error("❌ Firebase SDK Setup Error! Check Environment Variables.", e);
 }
 
 const db = admin.database();
