@@ -413,24 +413,36 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
 });
 
 app.post('/withdraw', async (req, res) => {
-    const { deviceId, method, details } = req.body;
+    // 🔥 NAYA: Ab 'amount' bhi receive hoga
+    const { deviceId, method, details, amount } = req.body; 
     try {
         const user = await User.findOne({ deviceId });
         if (!user) return res.status(404).json({ message: "User not found" });
-        if (user.balance < 50.0) return res.status(400).json({ message: "Minimum ₹50 required." });
+        
+        // 🛡️ Security Check (Agar amount 50 se kam hai ya balance se zyada hai)
+        const requestedAmount = parseFloat(amount);
+        if (isNaN(requestedAmount) || requestedAmount < 50.0) {
+            return res.status(400).json({ message: "Minimum ₹50 required." });
+        }
+        if (user.balance < requestedAmount) {
+            return res.status(400).json({ message: "Insufficient balance." });
+        }
 
-        const newPayout = new Payout({ deviceId, amount: user.balance, method, details });
+        // Database mein entry dalo (Sirf maanga hua amount)
+        const newPayout = new Payout({ deviceId, amount: requestedAmount, method, details });
         await newPayout.save();
 
         user.upiId = details; 
-        user.balance = 0; 
-        user.hasWithdrawnEver = true; // 🛑 Stops the 10% commission line permanently
+        
+        // 🔥 NAYA LOGIC: Paise 0 mat karo, sirf maanga hua amount minus karo!
+        user.balance -= requestedAmount; 
+        
+        user.hasWithdrawnEver = true; // Commission line stops
         await user.save();
 
         res.json({ status: "success", message: "Request Sent!" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
 app.post('/submit-solar-lead', async (req, res) => {
     const { deviceId, customerName, mobileNumber, city, bill } = req.body;
     try {
