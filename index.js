@@ -1,3 +1,4 @@
+require('dotenv').config(); // 👈 YEH LINE SABSE UPAR AAYEGI
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -35,7 +36,7 @@ const db = admin.database();
 // ==========================================
 // 1. DATABASE CONNECTION (MongoDB)
 // ==========================================
-const MONGO_URI = "mongodb+srv://admin:Keshav%402829@cluster0.tcdl2wy.mongodb.net/velocita?retryWrites=true&w=majority";
+const MONGO_URI = process.env.MONGO_URI; 
 
 mongoose.connect(MONGO_URI)
     .then(() => console.log("✅ DATABASE CONNECTED (MongoDB) - 🇮🇳 Indian Server"))
@@ -173,38 +174,66 @@ cron.schedule('0 21 * * *', async () => {
 }, { timezone: "Asia/Kolkata" });
 
 // ==========================================
-// 🛡️ ANTI-HACK SECURITY MIDDLEWARE
+// 🛡️ ADVANCED ANTI-HACK SECURITY MIDDLEWARE
 // ==========================================
-const APP_SECRET = "Velocita@2026_Ultra_Secure_Key_998877!"; 
+const APP_SECRET = process.env.APP_SECRET; 
 
 const TASK_REWARDS = {
     'captcha_batch': 0.04,
     'quiz_won': 0.05,
     'news_read': 0.05,
-    'daily_bonus': 1.00
+    'daily_bonus': 1.00,
+    'vip_radio_ping': 0.02  // 🚨 NAYA: RAM HACK KILLER! Ab amount server tay karega
 };
 
-const verifyAppSignature = (req, res, next) => {
+// Replay Attack rokne ke liye Cache memory
+const usedNonces = new Set();
+setInterval(() => usedNonces.clear(), 5 * 60 * 1000); // Har 5 min mein memory saaf karega
+
+const verifyAppSignature = async (req, res, next) => {
     const signature = req.headers['x-velo-signature'];
     const timestamp = req.headers['x-velo-timestamp'];
+    const nonce = req.headers['x-velo-nonce'];
+    const authHeader = req.headers['authorization']; 
 
-    if (!signature || !timestamp) {
+    if (!signature || !timestamp || !nonce || !authHeader) {
         return res.status(403).json({ error: "🛑 ACCESS DENIED: Missing Security Headers" });
     }
 
-    const now = Date.now();
-    if (Math.abs(now - parseInt(timestamp)) > 120000) {
-        return res.status(403).json({ error: "🛑 EXPIRED REQUEST: Possible Replay Attack" });
+    // 1. FIREBASE AUTH CHECK (Botnet Killer)
+    const idToken = authHeader.split('Bearer ')[1];
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        req.userEmail = decodedToken.email; // Asli email Firebase se nikala!
+    } catch (err) {
+        console.log(`🚨 FAKE GOOGLE LOGIN ATTEMPT: ${req.ip}`);
+        return res.status(403).json({ error: "🛑 FAKE ACCOUNT BLOCKED!" });
     }
 
+    // 2. REPLAY ATTACK CHECK (Time Machine Killer)
+    const now = Date.now();
+    if (Math.abs(now - parseInt(timestamp)) > 120000) {
+        return res.status(403).json({ error: "🛑 EXPIRED REQUEST" });
+    }
+    if (usedNonces.has(nonce)) {
+        console.log(`🚨 REPLAY ATTACK BLOCKED from ${req.userEmail}`);
+        return res.status(403).json({ error: "🛑 REQUEST ALREADY USED!" });
+    }
+    usedNonces.add(nonce);
+
+    // 3. HMAC SIGNATURE CHECK (Tamper Proofing)
     const payload = JSON.stringify(req.body);
     const expectedSignature = crypto.createHmac('sha256', APP_SECRET)
-                                    .update(payload + timestamp)
+                                    .update(payload + timestamp + nonce) // Nonce hash mein add kiya
                                     .digest('hex');
 
     if (signature !== expectedSignature) {
-        console.log(`🚨 HACK ATTEMPT DETECTED from IP: ${req.ip}`);
-        return res.status(403).json({ error: "🛑 INVALID SIGNATURE: Hacker Detected!" });
+        return res.status(403).json({ error: "🛑 INVALID SIGNATURE" });
+    }
+
+    // 4. IDENTITY MISMATCH CHECK (Hacker dusre ka email use nahi kar sakta)
+    if (req.body.deviceId && req.body.deviceId !== req.userEmail) {
+        return res.status(403).json({ error: "🛑 IDENTITY THEFT BLOCKED!" });
     }
 
     next();
@@ -216,9 +245,10 @@ const verifyAppSignature = (req, res, next) => {
 
 app.get('/', (req, res) => { res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳"); });
 
-// A. PING
-app.post('/ping', async (req, res) => {
-    const { deviceId, usage } = req.body;
+// A. PING (Now Secured!)
+app.post('/ping', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const { usage } = req.body;
     if (!deviceId) return res.status(400).json({ error: "No ID" });
 
     try {
@@ -233,11 +263,19 @@ app.post('/ping', async (req, res) => {
         const diff = (now - new Date(user.lastActive)) / 1000;
         
         if (diff > 8) { 
-            const earning = 0.01; 
-            user.balance += earning;
-            if (user.referredBy) {
-                const upline = await User.findOne({ deviceId: user.referredBy });
-                if (upline) { upline.balance += (earning * 0.10); await upline.save(); }
+            // 💸 70/30 SPLIT LOGIC
+            // Pawns rate: ₹16.60/GB. User's 30% share = ₹4.98/GB.
+            // 1 MB = ₹0.005 (User Share). Har ping par itna hi denge!
+            const earning = 0.005; 
+            
+            // 🚨 PING MEIN BHI LIMIT LAGA DI! (Unlimited Glitch Fixed) (Unlimited Glitch Fixed)
+            if (user.dailyTaskEarnings + earning <= 50.0) {
+                user.balance += earning;
+                user.dailyTaskEarnings += earning;
+                if (user.referredBy && !user.hasWithdrawnEver) {
+                    const upline = await User.findOne({ deviceId: user.referredBy });
+                    if (upline) { upline.balance += (earning * 0.10); await upline.save(); }
+                }
             }
             user.lastActive = now;
         }
@@ -254,9 +292,10 @@ app.post('/ping', async (req, res) => {
 });
 
 // B. SECURE UPDATE BALANCE (No direct amount accepted!)
+// B. SECURE UPDATE BALANCE (Server Decides Amount!)
 app.post('/updateBalance', verifyAppSignature, async (req, res) => {
-    // 1. Flutter se 'amount' bhi receive karenge
-    const { deviceId, taskId, amount } = req.body; 
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const { taskId, dynamicAmount } = req.body; 
     if (!deviceId || !taskId) return res.status(400).json({ error: "Missing data" });
 
     try {
@@ -270,24 +309,8 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 
         if (taskId === 'scratch_card') {
             finalAmount = parseFloat((Math.random() * 0.07 + 0.02).toFixed(2));
-            
-        } else if (taskId === 'vip_radio') {
-            // 💳 VIP RADIO DYNAMIC AMOUNT LOGIC
-            const reqAmount = parseFloat(amount);
-            if (!reqAmount || reqAmount <= 0) return res.status(400).json({ error: "Invalid Amount" });
-            
-            // 🛡️ ANTI-HACK SHIELD: Max ₹2.50 per request allow karenge.
-            // Agar koi hacker code badal kar ₹500 bhejne ki koshish karega, toh server usko max ₹2.50 hi dega.
-            if (reqAmount > 2.50) {
-                console.log(`🚨 Hack Attempt Blocked: ${deviceId} tried to add ₹${reqAmount}`);
-                finalAmount = 2.50; 
-            } else {
-                finalAmount = parseFloat(reqAmount.toFixed(2));
-            }
-
         } else if (TASK_REWARDS[taskId]) {
-            finalAmount = TASK_REWARDS[taskId];
-            
+            finalAmount = TASK_REWARDS[taskId]; // Server khud amount dega dictionary se
         } else {
             return res.status(400).json({ error: "Invalid Task ID" });
         }
@@ -299,7 +322,7 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         user.balance += finalAmount;
         user.dailyTaskEarnings += finalAmount;
 
-        // 💸 10% EARLY BIRD COMMISSION LOGIC
+        // 💸 10% EARLY BIRD COMMISSION
         if (user.referredBy && !user.hasWithdrawnEver && taskId !== 'daily_bonus') {
             const upline = await User.findOne({ deviceId: user.referredBy });
             if (upline) {
@@ -324,12 +347,17 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 // 💸 SERVER-TO-SERVER POSTBACK (For CPX & Monlix)
 // ==========================================
 app.get('/postback', async (req, res) => {
-    // CPX sends: ?ext_user_id=email@gmail.com&amount=30
-    // Monlix sends: ?userid=email@gmail.com&reward=30
-    const deviceId = req.query.ext_user_id || req.query.userid || req.query.subId; 
-    const amount = parseFloat(req.query.amount || req.query.reward);
+    // 🛡️ ANTI-HACK: Verify the secret key from the offerwall
+    const secret = req.query.secret || req.query.hash;
+    if (secret !== process.env.OFFERWALL_SECRET) {
+        console.error("🚨 FAKE POSTBACK BLOCKED! Invalid Secret.");
+        return res.status(403).send("0");
+    }
 
-    if (!deviceId || isNaN(amount)) {
+    const deviceId = req.query.ext_user_id || req.query.userid || req.query.subId; 
+    const amount = parseFloat(req.query.amount || req.query.reward);
+
+    if (!deviceId || isNaN(amount)) {
         console.error("❌ Postback Failed: Missing Parameters", req.query);
         return res.status(400).send("0"); // Network ko '0' bhejna hota hai fail hone par
     }
@@ -373,7 +401,8 @@ app.get('/postback', async (req, res) => {
 
 // 🎯 LIVE ARENA ANSWER EVALUATOR (Now Secured)
 app.post('/submit-answer', verifyAppSignature, async (req, res) => {
-    const { deviceId, q_id, answer, time_taken_ms } = req.body;
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const { q_id, answer, time_taken_ms } = req.body;
     try {
         const user = await User.findOne({ deviceId });
         if (!user || user.isEliminatedToday || !user.goldenPassUnlocked) {
@@ -412,15 +441,15 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
     }
 });
 
-app.post('/withdraw', async (req, res) => {
-    // 🔥 NAYA: Ab 'amount' bhi receive hoga
-    const { deviceId, method, details, amount } = req.body; 
+app.post('/withdraw', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const { method, details, amount } = req.body; 
     try {
         const user = await User.findOne({ deviceId });
         if (!user) return res.status(404).json({ message: "User not found" });
         
-        // 🛡️ Security Check (Agar amount 50 se kam hai ya balance se zyada hai)
-        const requestedAmount = parseFloat(amount);
+        // 🛡️ Security Check: Negative numbers block karne ke liye Math.abs lagaya
+        const requestedAmount = Math.abs(parseFloat(amount)); 
         if (isNaN(requestedAmount) || requestedAmount < 50.0) {
             return res.status(400).json({ message: "Minimum ₹50 required." });
         }
@@ -443,8 +472,9 @@ app.post('/withdraw', async (req, res) => {
         res.json({ status: "success", message: "Request Sent!" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/submit-solar-lead', async (req, res) => {
-    const { deviceId, customerName, mobileNumber, city, bill } = req.body;
+app.post('/submit-solar-lead', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const { customerName, mobileNumber, city, bill } = req.body;
     try {
         const existingLead = await SolarLead.findOne({ mobileNumber });
         if (existingLead) return res.status(400).json({ error: "Duplicate number!" });
@@ -456,20 +486,22 @@ app.post('/submit-solar-lead', async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
-app.get('/my-solar-leads', async (req, res) => {
-    const { deviceId } = req.query;
+// GET se POST kiya, aur req.query se req.body kiya!
+app.post('/my-solar-leads', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email 
     try { const leads = await SolarLead.find({ submittedBy: deviceId }).sort({ date: -1 }); res.json(leads); } 
     catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
-app.get('/my-transactions', async (req, res) => {
-    const { deviceId } = req.query;
+app.post('/my-transactions', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email 
     try { const payouts = await Payout.find({ deviceId }).sort({ date: -1 }); res.json(payouts); } 
     catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
-app.post('/bindReferral', async (req, res) => {
-    const { deviceId, hardwareId, promoCode } = req.body;
+app.post('/bindReferral', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const { hardwareId, promoCode } = req.body;
     try {
         if (hardwareId && hardwareId !== "unknown_device") {
             const existingDevice = await User.findOne({ hardwareId: hardwareId, hasClaimedReferral: true });
@@ -492,13 +524,35 @@ app.post('/bindReferral', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// 🗑️ SECURE DELETE USER ACCOUNT
+app.post('/deleteUser', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    if (!deviceId) return res.status(400).json({ error: "Missing data" });
+
+    try {
+        const deletedUser = await User.findOneAndDelete({ deviceId });
+        if (!deletedUser) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        
+        // Agar uska koi pending payout hai, usko bhi delete kar sakte ho (Optional but good practice)
+        await Payout.deleteMany({ deviceId: deviceId, status: "Pending" });
+
+        console.log(`🗑️ ACCOUNT DELETED: ${deviceId}`);
+        res.json({ success: true, message: "Account completely wiped." });
+    } catch (e) {
+        res.status(500).json({ error: "Server Error during deletion" });
+    }
+});
+
 // ==========================================
 // 🔐 SECURE ADMIN ROUTES
 // ==========================================
 const adminAuth = (req, res, next) => {
-    const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
-    const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
-    const ADMIN_USER = "admin"; const ADMIN_PASS = "velocita@2026"; 
+    const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
+    const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
+    const ADMIN_USER = process.env.ADMIN_USER; 
+    const ADMIN_PASS = process.env.ADMIN_PASS; 
     if (login === ADMIN_USER && password === ADMIN_PASS) { return next(); }
     res.set('WWW-Authenticate', 'Basic realm="Velocita Command Center"');
     res.status(401).send('🛑 ACCESS DENIED!');
@@ -557,9 +611,16 @@ app.post('/admin/update-solar-lead', adminAuth, async (req, res) => {
 
 // 🔮 ADD KBC QUESTION
 app.post('/admin/add-question', adminAuth, async (req, res) => {
-    const { question_en, options_en, correctAnswer } = req.body;
+    // Server ab Hindi data ko bhi extract karega
+    const { question_en, question_hi, options_en, options_hi, correctAnswer } = req.body;
     try {
-        const newQuestion = new LiveQuestion({ question_en, options_en, correctAnswer });
+        const newQuestion = new LiveQuestion({ 
+            question_en, 
+            question_hi, 
+            options_en, 
+            options_hi, 
+            correctAnswer 
+        });
         await newQuestion.save();
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: "Server Error" }); }
