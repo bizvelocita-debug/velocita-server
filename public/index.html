@@ -151,19 +151,30 @@
                 <label style="color:#888; font-size:12px;">Question (English):</label>
                 <input type="text" id="q_en" placeholder="e.g. Which planet is known as the Red Planet?">
             </div>
-            <div><label style="color:#888; font-size:12px;">Option A:</label><input type="text" id="opt_a" placeholder="Earth"></div>
-            <div><label style="color:#888; font-size:12px;">Option B:</label><input type="text" id="opt_b" placeholder="Mars"></div>
-            <div><label style="color:#888; font-size:12px;">Option C:</label><input type="text" id="opt_c" placeholder="Jupiter"></div>
-            <div><label style="color:#888; font-size:12px;">Option D:</label><input type="text" id="opt_d" placeholder="Venus"></div>
+            <div><label style="color:#888; font-size:12px;">EN Option A:</label><input type="text" id="opt_en_a" placeholder="Earth"></div>
+            <div><label style="color:#888; font-size:12px;">EN Option B:</label><input type="text" id="opt_en_b" placeholder="Mars"></div>
+            <div><label style="color:#888; font-size:12px;">EN Option C:</label><input type="text" id="opt_en_c" placeholder="Jupiter"></div>
+            <div><label style="color:#888; font-size:12px;">EN Option D:</label><input type="text" id="opt_en_d" placeholder="Venus"></div>
             
-            <div class="full-width" style="display:flex; gap:15px; align-items:flex-end;">
+            <hr class="full-width" style="border-color: #222; margin: 10px 0;">
+
+            <div class="full-width">
+                <label style="color:#888; font-size:12px;">Question (Hindi):</label>
+                <input type="text" id="q_hi" placeholder="उदाहरण: किस ग्रह को लाल ग्रह कहा जाता है?">
+            </div>
+            <div><label style="color:#888; font-size:12px;">HI Option A:</label><input type="text" id="opt_hi_a" placeholder="पृथ्वी"></div>
+            <div><label style="color:#888; font-size:12px;">HI Option B:</label><input type="text" id="opt_hi_b" placeholder="मंगल"></div>
+            <div><label style="color:#888; font-size:12px;">HI Option C:</label><input type="text" id="opt_hi_c" placeholder="बृहस्पति"></div>
+            <div><label style="color:#888; font-size:12px;">HI Option D:</label><input type="text" id="opt_hi_d" placeholder="शुक्र"></div>
+            
+            <div class="full-width" style="display:flex; gap:15px; align-items:flex-end; margin-top: 15px;">
                 <div style="flex:1;">
                     <label style="color:var(--jackpot); font-weight:bold; font-size:14px;">Secret Correct Answer:</label>
                     <select id="correct_ans">
-                        <option value="A">A</option>
-                        <option value="B">B</option>
-                        <option value="C">C</option>
-                        <option value="D">D</option>
+                        <option value="A">Option A</option>
+                        <option value="B">Option B</option>
+                        <option value="C">Option C</option>
+                        <option value="D">Option D</option>
                     </select>
                 </div>
                 <button class="btn submit-q-btn" style="flex:2;" onclick="submitQuestion()">💾 ADD TO VAULT (Zero Repeat)</button>
@@ -223,7 +234,6 @@
     <script>
         // API Endpoints
         const USERS_URL = "/admin/users";
-        // 🔥 UPDATE: Changed to all-payouts to load full history
         const PAYOUTS_URL = "/admin/all-payouts";
         const PAY_URL = "/admin/pay";
         const SOLAR_LEADS_URL = "/admin/solar-leads";
@@ -284,7 +294,6 @@
             document.getElementById("totalMoney").innerText = totalBal.toFixed(4);
             document.getElementById("passCount").innerText = goldenPassCount;
             
-            // ✅ UPDATED: Math fix. 1 Winner = ₹50
             document.getElementById("estPool").innerText = (goldenPassCount * 50).toFixed(2); 
             
             document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5'>No users</td></tr>";
@@ -310,7 +319,6 @@
             });
             document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>No records found.</td></tr>";
             
-            // 🔥 Count only pending ones for the top card
             document.getElementById("pendingCount").innerText = pendingPayouts;
 
             // Render Solar Leads
@@ -327,20 +335,32 @@
         }
 
         async function submitQuestion() {
+            // Fetch English values
             const q_en = document.getElementById("q_en").value.trim();
-            const opt_a = document.getElementById("opt_a").value.trim();
-            const opt_b = document.getElementById("opt_b").value.trim();
-            const opt_c = document.getElementById("opt_c").value.trim();
-            const opt_d = document.getElementById("opt_d").value.trim();
+            const opt_en_a = document.getElementById("opt_en_a").value.trim();
+            const opt_en_b = document.getElementById("opt_en_b").value.trim();
+            const opt_en_c = document.getElementById("opt_en_c").value.trim();
+            const opt_en_d = document.getElementById("opt_en_d").value.trim();
+            
+            // Fetch Hindi values
+            const q_hi = document.getElementById("q_hi").value.trim();
+            const opt_hi_a = document.getElementById("opt_hi_a").value.trim();
+            const opt_hi_b = document.getElementById("opt_hi_b").value.trim();
+            const opt_hi_c = document.getElementById("opt_hi_c").value.trim();
+            const opt_hi_d = document.getElementById("opt_hi_d").value.trim();
+
             const correct_ans = document.getElementById("correct_ans").value;
 
-            if(!q_en || !opt_a || !opt_b || !opt_c || !opt_d) {
-                alert("⚠️ Please fill all question fields!"); return;
+            // Basic validation (at least English is required)
+            if(!q_en || !opt_en_a || !opt_en_b || !opt_en_c || !opt_en_d) {
+                alert("⚠️ Please fill all English question fields!"); return;
             }
 
             const payload = {
                 question_en: q_en,
-                options_en: { "A": opt_a, "B": opt_b, "C": opt_c, "D": opt_d },
+                question_hi: q_hi, // Will be empty string if left blank
+                options_en: { "A": opt_en_a, "B": opt_en_b, "C": opt_en_c, "D": opt_en_d },
+                options_hi: { "A": opt_hi_a, "B": opt_hi_b, "C": opt_hi_c, "D": opt_hi_d },
                 correctAnswer: correct_ans
             };
 
@@ -353,8 +373,9 @@
                 
                 if(response.ok) {
                     alert("✅ Question Saved to Vault! (It will never be repeated)");
-                    document.getElementById("q_en").value = "";
-                    document.getElementById("opt_a").value = ""; document.getElementById("opt_b").value = ""; document.getElementById("opt_c").value = ""; document.getElementById("opt_d").value = "";
+                    // Clear all fields
+                    const inputs = document.querySelectorAll('.q-form input');
+                    inputs.forEach(input => input.value = '');
                 } else { alert("❌ Failed to save question."); }
             } catch(e) { alert("❌ Connection Error."); }
         }
