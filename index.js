@@ -11,7 +11,12 @@ const admin = require('firebase-admin');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// 🛡️ NAYA: Raw JSON body ko save karna taaki Security Signature match ho sake
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf.toString();
+    }
+}));
 
 // ==========================================
 // 🔑 FIREBASE ADMIN SETUP (For RTDB Live Engine)
@@ -222,7 +227,7 @@ const verifyAppSignature = async (req, res, next) => {
     usedNonces.add(nonce);
 
     // 3. HMAC SIGNATURE CHECK (Tamper Proofing)
-    const payload = JSON.stringify(req.body);
+    const payload = req.rawBody || ""; // 🎯 FIXED: Ab exact wahi data check hoga jo app ne bheja tha
     const expectedSignature = crypto.createHmac('sha256', APP_SECRET)
                                     .update(payload + timestamp + nonce) // Nonce hash mein add kiya
                                     .digest('hex');
