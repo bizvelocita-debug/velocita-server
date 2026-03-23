@@ -65,6 +65,9 @@ const userSchema = new mongoose.Schema({
     // 🛡️ Anti-Hack: Daily Limit Trackers for Tasks
     dailyTaskEarnings: { type: Number, default: 0 },
     lastTaskDate: { type: String, default: "" },
+    lastTaskTime: { type: Date, default: null }, // ⏳ Rate Limiting (Auto-clicker blocker)
+    lastBonusDate: { type: String, default: "" }, // 🎁 NAYA: Daily Bonus Hack Blocker
+    fcmToken: { type: String, default: "" },     // 🔔 Push Notification Token
 
     // 🔥 JACKPOT ECONOMY
     dailyTaskMeter: { type: Number, default: 0.00 }, // Dabba 2: (₹0 to ₹50 Target)
@@ -139,6 +142,30 @@ cron.schedule('55 20 * * *', async () => {
     try {
         await db.ref('live_arena/current_question').set({ status: "HYPE" });
     } catch(e) { console.error(e); }
+}, { timezone: "Asia/Kolkata" });
+
+// 🔔 4. THE 8:50 PM ALARM (FCM Push Notification)
+cron.schedule('50 20 * * *', async () => {
+    console.log("🔔 8:50 PM: Sending FCM Notification to all users...");
+    try {
+        const users = await User.find({ fcmToken: { $ne: "" } }).select('fcmToken');
+        const tokens = users.map(u => u.fcmToken);
+        
+        if (tokens.length > 0) {
+            // Firebase ek baar mein max 500 logo ko msg bhejta hai
+            for (let i = 0; i < tokens.length; i += 500) {
+                const chunk = tokens.slice(i, i + 500);
+                await admin.messaging().sendEachForMulticast({
+                    notification: { 
+                        title: "🔥 KBC Arena starts in 5 mins!", 
+                        body: "Hurry up! Win ₹50,000 Cash! Open the app now! 💸" 
+                    },
+                    tokens: chunk
+                });
+            }
+            console.log(`✅ Sent notification to ${tokens.length} devices!`);
+        }
+    } catch(e) { console.error("❌ FCM Error:", e); }
 }, { timezone: "Asia/Kolkata" });
 
 // 🎬 3. THE 9:00 PM LIVE KBC ENGINE
@@ -296,10 +323,9 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
-// B. SECURE UPDATE BALANCE (No direct amount accepted!)
-// B. SECURE UPDATE BALANCE (Server Decides Amount!)
+// B. SECURE UPDATE BALANCE (With Auto-Clicker & Bonus Protection)
 app.post('/updateBalance', verifyAppSignature, async (req, res) => {
-    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const deviceId = req.userEmail;
     const { taskId, dynamicAmount } = req.body; 
     if (!deviceId || !taskId) return res.status(400).json({ error: "Missing data" });
 
@@ -307,15 +333,35 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         const user = await User.findOne({ deviceId });
         if (!user) return res.status(404).json({ error: "User not found" });
 
-        const today = new Date().toISOString().substring(0, 10); 
+        const now = new Date();
+        const today = now.toISOString().substring(0, 10); 
         if (user.lastTaskDate !== today) { user.dailyTaskEarnings = 0; user.lastTaskDate = today; }
 
-        let finalAmount = 0;
+        // 🛑 1. DAILY BONUS HACK BLOCKER
+        if (taskId === 'daily_bonus') {
+            if (user.lastBonusDate === today) {
+                console.log(`🚨 BONUS HACK ATTEMPT by ${deviceId}`);
+                return res.status(429).json({ error: "🚫 Hack Attempt! Bonus already claimed today." });
+            }
+            user.lastBonusDate = today; // Aaj ka bonus lock kar diya
+        }
 
+        // 🛑 2. RATE LIMITING (Auto-Clicker & Radio Speed Hack Blocker)
+        if (user.lastTaskTime) {
+            const timeDiff = (now - user.lastTaskTime) / 1000; // Seconds mein
+            
+            if (taskId === 'vip_radio_ping') {
+                if (timeDiff < 55) return res.status(429).json({ error: "⏳ Radio Speed Hack Detected!" });
+            } else if (taskId !== 'daily_bonus') {
+                if (timeDiff < 10) return res.status(429).json({ error: "⏳ Too fast! System cooling down." });
+            }
+        }
+
+        let finalAmount = 0;
         if (taskId === 'scratch_card') {
             finalAmount = parseFloat((Math.random() * 0.07 + 0.02).toFixed(2));
         } else if (TASK_REWARDS[taskId]) {
-            finalAmount = TASK_REWARDS[taskId]; // Server khud amount dega dictionary se
+            finalAmount = TASK_REWARDS[taskId]; 
         } else {
             return res.status(400).json({ error: "Invalid Task ID" });
         }
@@ -326,6 +372,7 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 
         user.balance += finalAmount;
         user.dailyTaskEarnings += finalAmount;
+        user.lastTaskTime = now; // ⏳ Timer reset kar diya
 
         // 💸 10% EARLY BIRD COMMISSION
         if (user.referredBy && !user.hasWithdrawnEver && taskId !== 'daily_bonus') {
@@ -346,6 +393,17 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         await user.save();
         res.json({ success: true, addedAmount: finalAmount, newBalance: user.balance, dailyMeter: user.dailyTaskMeter, isUnlocked: user.goldenPassUnlocked });
     } catch (e) { res.status(500).json({ error: "Server Error" }); }
+});
+
+// 🔔 ROUTE: Naye user ka Notification Token Save karne ke liye
+app.post('/update-fcm', verifyAppSignature, async (req, res) => {
+    try {
+        await User.findOneAndUpdate(
+            { deviceId: req.userEmail }, 
+            { fcmToken: req.body.fcmToken }
+        );
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: "FCM Update Error" }); }
 });
 
 // ==========================================
@@ -446,35 +504,32 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
     }
 });
 
+// 💸 BULLETPROOF WITHDRAW ROUTE (Double-Tap Hack Preventer)
 app.post('/withdraw', verifyAppSignature, async (req, res) => {
-    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const deviceId = req.userEmail;
     const { method, details, amount } = req.body; 
     try {
-        const user = await User.findOne({ deviceId });
-        if (!user) return res.status(404).json({ message: "User not found" });
-        
-        // 🛡️ Security Check: Negative numbers block karne ke liye Math.abs lagaya
         const requestedAmount = Math.abs(parseFloat(amount)); 
         if (isNaN(requestedAmount) || requestedAmount < 50.0) {
             return res.status(400).json({ message: "Minimum ₹50 required." });
         }
-        if (user.balance < requestedAmount) {
-            return res.status(400).json({ message: "Insufficient balance." });
+
+        // 🔥 FIX: Atomic Update (MongoDB pehle paise kaatega, fir aage badhega. Double-tap fail ho jayega!)
+        const user = await User.findOneAndUpdate(
+            { deviceId: deviceId, balance: { $gte: requestedAmount } }, // Check: Balance sufficient hai ya nahi
+            { $inc: { balance: -requestedAmount }, $set: { hasWithdrawnEver: true, upiId: details } }, // Deduct balance
+            { new: true }
+        );
+
+        if (!user) {
+            return res.status(400).json({ message: "Insufficient balance or invalid request!" });
         }
 
-        // Database mein entry dalo (Sirf maanga hua amount)
+        // Ab database mein Payout ki entry daalo
         const newPayout = new Payout({ deviceId, amount: requestedAmount, method, details });
         await newPayout.save();
 
-        user.upiId = details; 
-        
-        // 🔥 NAYA LOGIC: Paise 0 mat karo, sirf maanga hua amount minus karo!
-        user.balance -= requestedAmount; 
-        
-        user.hasWithdrawnEver = true; // Commission line stops
-        await user.save();
-
-        res.json({ status: "success", message: "Request Sent!" });
+        res.json({ status: "success", message: "Request Sent to Admin!" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/submit-solar-lead', verifyAppSignature, async (req, res) => {
@@ -508,25 +563,45 @@ app.post('/bindReferral', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail; // 🛡️ Firebase Token Email
     const { hardwareId, promoCode } = req.body;
     try {
+        // 1. Hardware ID Check (Fraud Rokne Ke Liye)
         if (hardwareId && hardwareId !== "unknown_device") {
             const existingDevice = await User.findOne({ hardwareId: hardwareId, hasClaimedReferral: true });
-            if (existingDevice && existingDevice.deviceId !== deviceId) return res.status(400).json({ error: "Fraud detected!" });
+            if (existingDevice && existingDevice.deviceId !== deviceId) {
+                return res.status(400).json({ error: "Device already used for referral!" });
+            }
         }
+        
         let user = await User.findOne({ deviceId });
-        if (!user || user.referredBy || user.hasClaimedReferral) return res.status(400).json({ error: "Invalid/Already claimed" });
+        
+        // 🔥 FIX: Agar user Database mein nahi hai, toh pehle uska Naya Account banao!
+        if (!user) {
+            const baseName = deviceId.split('@')[0].toUpperCase();
+            user = new User({ deviceId: deviceId, referralCode: "VELO-" + baseName, hardwareId: hardwareId });
+            await user.save();
+        } else if (user.referredBy || user.hasClaimedReferral) {
+            return res.status(400).json({ error: "Referral already claimed!" });
+        }
 
+        // 2. Referrer (Dost) Ka Code Check Karo
         const referrer = await User.findOne({ referralCode: promoCode });
-        if (!referrer || referrer.deviceId === deviceId) return res.status(400).json({ error: "Invalid Code" });
+        if (!referrer) return res.status(400).json({ error: "Invalid VIP Code!" });
+        if (referrer.deviceId === deviceId) return res.status(400).json({ error: "Cannot use your own code!" });
 
+        // 3. Dost Ko ₹10 Bonus Do
         referrer.balance += 10.00; 
         referrer.totalInvites += 1; // 📈 Gamification Milestone Track
         await referrer.save();
 
-        user.referredBy = referrer.deviceId; user.hardwareId = hardwareId; user.hasClaimedReferral = true; 
+        // 4. Naye User ki profile update karo
+        user.referredBy = referrer.deviceId; 
+        user.hardwareId = hardwareId; 
+        user.hasClaimedReferral = true; 
         await user.save();
 
         res.json({ success: true, message: "Referral Applied!" });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 // 🗑️ SECURE DELETE USER ACCOUNT
@@ -584,6 +659,31 @@ app.post('/admin/pay', adminAuth, async (req, res) => {
         res.json({ success: true, message: "Payment Marked as Paid" });
     } catch(e) {
         res.status(500).json({ error: "Failed to update status" });
+    }
+});
+// 💸 NAYA: PAYOUT REJECT AND REFUND SYSTEM
+app.post('/admin/reject', adminAuth, async (req, res) => {
+    const { payoutId } = req.body; 
+    try {
+        const payout = await Payout.findById(payoutId);
+        if (!payout || payout.status !== "Pending") {
+            return res.status(400).json({ error: "Invalid or already processed payout" });
+        }
+
+        // User ko dhundh kar uske paise wapas (Refund) karo
+        const user = await User.findOne({ deviceId: payout.deviceId });
+        if (user) {
+            user.balance += payout.amount;
+            await user.save();
+        }
+
+        // Payout ko cancel kar do
+        payout.status = "Rejected"; 
+        await payout.save();
+
+        res.json({ success: true, message: "Payment Rejected & Refunded to User!" });
+    } catch(e) {
+        res.status(500).json({ error: "Failed to reject payout" });
     }
 });
 
