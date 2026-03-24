@@ -232,7 +232,10 @@ const verifyAppSignature = async (req, res, next) => {
         return res.status(403).json({ error: "🛑 ACCESS DENIED: Missing Security Headers" });
     }
 
-    // 1. FIREBASE AUTH CHECK (Botnet Killer)
+    // 1. FIREBASE AUTH CHECK (Botnet Killer - CRASH FIXED)
+    if (!authHeader.startsWith('Bearer ')) {
+        return res.status(403).json({ error: "🛑 INVALID AUTH FORMAT" });
+    }
     const idToken = authHeader.split('Bearer ')[1];
     try {
         const decodedToken = await admin.auth().verifyIdToken(idToken);
@@ -370,8 +373,9 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
             return res.status(429).json({ error: "Daily limit reached. Use Premium Offers for unlimited earning!" });
         }
 
-        user.balance += finalAmount;
-        user.dailyTaskEarnings += finalAmount;
+        // 🧮 JavaScript Math Bug Fix (Paison ka hisaab ekdum sateek!)
+        user.balance = parseFloat((user.balance + finalAmount).toFixed(4));
+        user.dailyTaskEarnings = parseFloat((user.dailyTaskEarnings + finalAmount).toFixed(4));
         user.lastTaskTime = now; // ⏳ Timer reset kar diya
 
         // 💸 10% EARLY BIRD COMMISSION
@@ -462,37 +466,34 @@ app.get('/postback', async (req, res) => {
     }
 });
 
-// 🎯 LIVE ARENA ANSWER EVALUATOR (Now Secured)
+// 🎯 LIVE ARENA ANSWER EVALUATOR (Now Buffer Secured)
 app.post('/submit-answer', verifyAppSignature, async (req, res) => {
-    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
-    const { q_id, answer, time_taken_ms } = req.body;
+    const deviceId = req.userEmail;
+    const { q_id, answer } = req.body; // time_taken_ms yahan use nahi hota, backend time use hota hai
     try {
         const user = await User.findOne({ deviceId });
         if (!user || user.isEliminatedToday || !user.goldenPassUnlocked) {
             return res.json({ success: false, message: "Eliminated or No Pass" });
         }
 
-        // Fetch Question to Check Answer
         const question = await LiveQuestion.findById(q_id);
         if (!question) return res.json({ success: false });
 
-        // Get Firebase Global Time to check if they submitted inside 10 seconds
         const currentData = await db.ref('live_arena/current_question').once('value');
         const rtdbData = currentData.val();
         
-        const isTimeOver = (Date.now() - rtdbData.timestamp) > 10500; // 10.5 secs logic
+        // 🛡️ NAYA: 13 Second ka Buffer diya hai (Network Ping Latency bachaane ke liye)
+        const isTimeOver = (Date.now() - rtdbData.timestamp) > 13000; 
 
         if (isTimeOver || answer !== question.correctAnswer) {
-            // WRONG OR LATE! ELIMINATE!
             user.isEliminatedToday = true;
             await user.save();
             return res.json({ success: false, message: "Eliminated" });
         }
 
-        // CORRECT & ON TIME! (Assuming 1 Question Daily for now)
         const today = new Date().toISOString().substring(0, 10);
         if (user.lastArenaWinDate !== today) {
-            user.balance += 50.00; // Add Mini-Jackpot to Wallet
+            user.balance += 50.00; 
             user.lastArenaWinDate = today;
             await user.save();
             return res.json({ success: true, message: "Winner! ₹50 Added." });
