@@ -305,16 +305,26 @@
                 let isPaid = p.status === 'Paid';
                 if(!isPaid) pendingPayouts++;
 
-                let actionHtml = isPaid 
-                    ? `<span style="color:var(--primary); font-weight:bold;">🟢 PAID</span>` 
-                    : `<button class="btn payout-btn" onclick="markAsPaid('${p._id}')">MARK PAID</button>`;
+                let statusBadge = "";
+                let actionHtml = "";
+                
+                if (p.status === 'Paid') {
+                    statusBadge = `<span style="color:var(--primary); font-weight:bold;">🟢 PAID</span>`;
+                } else if (p.status === 'Rejected') {
+                    statusBadge = `<span style="color:var(--danger); font-weight:bold;">🔴 REJECTED</span>`;
+                } else {
+                    actionHtml = `
+                        <button class="btn payout-btn" onclick="markAsPaid('${p._id}')">✅ PAID</button>
+                        <button class="btn" style="background:var(--danger); color:white; margin-left:5px;" onclick="rejectPayout('${p._id}')">❌ REJECT</button>
+                    `;
+                }
 
                 payoutHtml += `<tr>
                     <td>${new Date(p.date).toLocaleDateString()}</td>
                     <td style="color:white;">${p.deviceId}</td>
                     <td style="color: #00ff41; font-weight:bold;">₹${p.amount.toFixed(2)}</td>
                     <td style="color: var(--warning);">${p.details}</td>
-                    <td>${actionHtml}</td>
+                    <td>${statusBadge || actionHtml}</td>
                 </tr>`;
             });
             document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>No records found.</td></tr>";
@@ -384,6 +394,26 @@
             if(!confirm("Are you sure?")) return;
             await fetch(PAY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payoutId: payoutId }) });
             loadAllData();
+        }
+        async function rejectPayout(payoutId) {
+            if(!confirm("⚠️ REJECT PAYOUT?\n\nThis will cancel the payout and REFUND the money back to the user's wallet. Are you sure?")) return;
+            
+            try {
+                const response = await fetch("/admin/reject", { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ payoutId: payoutId }) 
+                });
+                
+                if (response.ok) {
+                    alert("✅ Payout Rejected & Money Refunded!");
+                    loadAllData();
+                } else {
+                    alert("❌ Failed to reject payout.");
+                }
+            } catch(e) {
+                alert("❌ Connection Error.");
+            }
         }
 
         async function updateSolarStatus(leadId, newStatus) {
