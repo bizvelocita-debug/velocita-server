@@ -48,6 +48,7 @@ mongoose.connect(MONGO_URI)
     .catch(err => console.error("❌ DB ERROR:", err));
 
 // ==========================================
+// ==========================================
 // 2. DATA MODELS
 // ==========================================
 const userSchema = new mongoose.Schema({
@@ -66,7 +67,8 @@ const userSchema = new mongoose.Schema({
     dailyTaskEarnings: { type: Number, default: 0 },
     lastTaskDate: { type: String, default: "" },
     lastTaskTime: { type: Date, default: null }, // ⏳ Rate Limiting (Auto-clicker blocker)
-    lastBonusDate: { type: String, default: "" }, // 🎁 NAYA: Daily Bonus Hack Blocker
+    lastBonusDate: { type: String, default: "" }, // 🎁 Daily Bonus Hack Blocker
+    scratchCountToday: { type: Number, default: 0 }, // 🔥 NAYA: Scratch limit counter
     fcmToken: { type: String, default: "" },     // 🔔 Push Notification Token
 
     // 🔥 JACKPOT ECONOMY
@@ -116,55 +118,79 @@ const liveQuestionSchema = new mongoose.Schema({
     usedDate: { type: Date, default: null }
 });
 const LiveQuestion = mongoose.model('LiveQuestion', liveQuestionSchema);
+// 🛡️ ANTI-HACK: Device Blacklist for Referrals
+const usedDeviceSchema = new mongoose.Schema({
+    hardwareId: { type: String, unique: true }
+});
+const UsedDevice = mongoose.model('UsedDevice', usedDeviceSchema);
 
 
 // ==========================================
 // 🤖 THE KBC MASTER ROBOTS (CRON JOBS)
 // ==========================================
 
-// 🧹 1. MIDNIGHT SWEEPER (Runs daily at 12:00 AM IST)
+// 🧹 1. MIDNIGHT SWEEPER (Server-Safe Batch Processing)
 cron.schedule('0 0 * * *', async () => {
-    console.log("🧹 MIDNIGHT SWEEPER: Resetting Daily Meters & Locking Golden Passes...");
+    console.log("🧹 MIDNIGHT SWEEPER: Resetting Safely...");
     try {
-        await User.updateMany(
-            {}, 
-            { $set: { dailyTaskMeter: 0, goldenPassUnlocked: false, isEliminatedToday: false } }
-        );
-        // Reset Arena Status
         await db.ref('live_arena/current_question').set({ status: "WAITING" });
-        console.log("✅ All passes locked and meters reset for the new day!");
+
+        // Cursor use kiya taaki RAM over-load na ho
+        const cursor = User.find({ 
+            $or: [{ dailyTaskMeter: { $gt: 0 } }, { goldenPassUnlocked: true }, { isEliminatedToday: true }] 
+        }).cursor();
+
+        let bulkOps = [];
+        for await (const doc of cursor) {
+            bulkOps.push({
+                updateOne: {
+                    filter: { _id: doc._id },
+                    update: { $set: { dailyTaskMeter: 0, goldenPassUnlocked: false, isEliminatedToday: false } }
+                }
+            });
+
+            if (bulkOps.length === 1000) { // 1000 users ek baar mein
+                await User.bulkWrite(bulkOps);
+                bulkOps = [];
+            }
+        }
+        if (bulkOps.length > 0) await User.bulkWrite(bulkOps); // Bache hue users
+        console.log("✅ All passes locked and meters reset without crashing Server!");
     } catch (e) { console.error("❌ Midnight Sweeper Error:", e); }
 }, { timezone: "Asia/Kolkata" });
 
 // 🚨 2. THE 8:55 PM HYPE TRIGGER
 cron.schedule('55 20 * * *', async () => {
     console.log("🔥 8:55 PM: THE GATES ARE OPEN! Broadcasting HYPE mode...");
-    try {
-        await db.ref('live_arena/current_question').set({ status: "HYPE" });
-    } catch(e) { console.error(e); }
+    try { await db.ref('live_arena/current_question').set({ status: "HYPE" }); } catch(e) { }
 }, { timezone: "Asia/Kolkata" });
 
-// 🔔 4. THE 8:50 PM ALARM (FCM Push Notification)
+// 🔔 4. THE 8:50 PM ALARM (Memory-Safe Notification Sender)
 cron.schedule('50 20 * * *', async () => {
-    console.log("🔔 8:50 PM: Sending FCM Notification to all users...");
+    console.log("🔔 8:50 PM: Sending FCM Notification in batches...");
     try {
-        const users = await User.find({ fcmToken: { $ne: "" } }).select('fcmToken');
-        const tokens = users.map(u => u.fcmToken);
+        // Cursor memory leak nahi hone dega
+        const cursor = User.find({ fcmToken: { $ne: "", $exists: true } }).select('fcmToken').cursor();
         
-        if (tokens.length > 0) {
-            // Firebase ek baar mein max 500 logo ko msg bhejta hai
-            for (let i = 0; i < tokens.length; i += 500) {
-                const chunk = tokens.slice(i, i + 500);
+        let tokens = [];
+        for await (const doc of cursor) {
+            tokens.push(doc.fcmToken);
+            
+            if (tokens.length === 500) { // Firebase ki max limit 500 hai
                 await admin.messaging().sendEachForMulticast({
-                    notification: { 
-                        title: "🔥 KBC Arena starts in 5 mins!", 
-                        body: "Hurry up! Win ₹50,000 Cash! Open the app now! 💸" 
-                    },
-                    tokens: chunk
-                });
+                    notification: { title: "🔥 KBC Arena starts in 5 mins!", body: "Hurry up! Win ₹50,000 Cash! Open the app now! 💸" },
+                    tokens: tokens
+                }).catch(e => console.log("Batch push failed, ignoring..."));
+                tokens = [];
             }
-            console.log(`✅ Sent notification to ${tokens.length} devices!`);
         }
+        if (tokens.length > 0) { // Bache hue 500 se kam logo ko bhejo
+            await admin.messaging().sendEachForMulticast({
+                notification: { title: "🔥 KBC Arena starts in 5 mins!", body: "Hurry up! Win ₹50,000 Cash! Open the app now! 💸" },
+                tokens: tokens
+            }).catch(e => {});
+        }
+        console.log(`✅ Safely sent all notifications!`);
     } catch(e) { console.error("❌ FCM Error:", e); }
 }, { timezone: "Asia/Kolkata" });
 
@@ -218,10 +244,16 @@ const TASK_REWARDS = {
     'vip_radio_ping': 0.02  // 🚨 NAYA: RAM HACK KILLER! Ab amount server tay karega
 };
 
-// Replay Attack rokne ke liye Cache memory
-const usedNonces = new Set();
-setInterval(() => usedNonces.clear(), 5 * 60 * 1000); // Har 5 min mein memory saaf karega
-
+// 🛡️ FIX 1: ADVANCED NONCE CACHE (Replay Attack Killer)
+const usedNonces = new Map();
+const NONCE_TTL = 60 * 1000; // 60 seconds expiry
+// Ye loop sirf EXPIRE hue nonces ko delete karega, poori memory saaf nahi karega
+setInterval(() => {
+    const now = Date.now();
+    for (let [nonce, timestamp] of usedNonces.entries()) {
+        if (now - timestamp > NONCE_TTL) usedNonces.delete(nonce);
+    }
+}, 10 * 1000); // Har 10 second mein check karega
 const verifyAppSignature = async (req, res, next) => {
     const signature = req.headers['x-velo-signature'];
     const timestamp = req.headers['x-velo-timestamp'];
@@ -245,16 +277,16 @@ const verifyAppSignature = async (req, res, next) => {
         return res.status(403).json({ error: "🛑 FAKE ACCOUNT BLOCKED!" });
     }
 
-    // 2. REPLAY ATTACK CHECK (Time Machine Killer)
+    // 2. REPLAY ATTACK CHECK (Time Machine Killer - 60s Strict Window)
     const now = Date.now();
-    if (Math.abs(now - parseInt(timestamp)) > 120000) {
+    if (Math.abs(now - parseInt(timestamp)) > 60000) { // 👈 120s se 60s kar diya
         return res.status(403).json({ error: "🛑 EXPIRED REQUEST" });
     }
     if (usedNonces.has(nonce)) {
         console.log(`🚨 REPLAY ATTACK BLOCKED from ${req.userEmail}`);
         return res.status(403).json({ error: "🛑 REQUEST ALREADY USED!" });
     }
-    usedNonces.add(nonce);
+    usedNonces.set(nonce, now); // 👈 Map mein time ke sath save kiya
 
     // 3. HMAC SIGNATURE CHECK (Tamper Proofing)
     const payload = req.rawBody || ""; // 🎯 FIXED: Ab exact wahi data check hoga jo app ne bheja tha
@@ -338,7 +370,13 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 
         const now = new Date();
         const today = now.toISOString().substring(0, 10); 
-        if (user.lastTaskDate !== today) { user.dailyTaskEarnings = 0; user.lastTaskDate = today; }
+
+        // 🔥 Daily Reset Logic (Naya din shuru hone par sab clear karo)
+        if (user.lastTaskDate !== today) { 
+            user.dailyTaskEarnings = 0; 
+            user.lastTaskDate = today; 
+            user.scratchCountToday = 0; // Agle din scratch wapas 0 kar do
+        }
 
         // 🛑 1. DAILY BONUS HACK BLOCKER
         if (taskId === 'daily_bonus') {
@@ -346,20 +384,30 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
                 console.log(`🚨 BONUS HACK ATTEMPT by ${deviceId}`);
                 return res.status(429).json({ error: "🚫 Hack Attempt! Bonus already claimed today." });
             }
-            user.lastBonusDate = today; // Aaj ka bonus lock kar diya
+            user.lastBonusDate = today; 
         }
 
-        // 🛑 2. RATE LIMITING (Auto-Clicker & Radio Speed Hack Blocker)
+        // 🛑 2. SCRATCH CARD HACK BLOCKER (Sirf 5 per day)
+        if (taskId === 'scratch_card') {
+            if (user.scratchCountToday >= 5) {
+                console.log(`🚨 SCRATCH HACK ATTEMPT by ${deviceId}`);
+                return res.status(429).json({ error: "🚫 Daily Scratch Limit Reached!" });
+            }
+            user.scratchCountToday += 1; // Ginti badha di
+        }
+
+        // 🛑 3. RATE LIMITING (Auto-Clicker & Radio Speed Hack Blocker)
         if (user.lastTaskTime) {
-            const timeDiff = (now - user.lastTaskTime) / 1000; // Seconds mein
+            const timeDiff = (now - user.lastTaskTime) / 1000; 
             
             if (taskId === 'vip_radio_ping') {
                 if (timeDiff < 55) return res.status(429).json({ error: "⏳ Radio Speed Hack Detected!" });
-            } else if (taskId !== 'daily_bonus') {
-                if (timeDiff < 10) return res.status(429).json({ error: "⏳ Too fast! System cooling down." });
+            } else if (taskId !== 'daily_bonus' && taskId !== 'scratch_card') {
+                if (timeDiff < 5) return res.status(429).json({ error: "⏳ Too fast! System cooling down." }); 
             }
         }
 
+        // 💰 REWARD ASSIGNMENT
         let finalAmount = 0;
         if (taskId === 'scratch_card') {
             finalAmount = parseFloat((Math.random() * 0.07 + 0.02).toFixed(2));
@@ -369,14 +417,15 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
             return res.status(400).json({ error: "Invalid Task ID" });
         }
 
+        // 🛑 MAX DAILY LIMIT CHECK (Taaki app bankrupt na ho)
         if (user.dailyTaskEarnings + finalAmount > 50.0) {
             return res.status(429).json({ error: "Daily limit reached. Use Premium Offers for unlimited earning!" });
         }
 
-        // 🧮 JavaScript Math Bug Fix (Paison ka hisaab ekdum sateek!)
+        // 🧮 BALANCE UPDATE
         user.balance = parseFloat((user.balance + finalAmount).toFixed(4));
         user.dailyTaskEarnings = parseFloat((user.dailyTaskEarnings + finalAmount).toFixed(4));
-        user.lastTaskTime = now; // ⏳ Timer reset kar diya
+        user.lastTaskTime = now; 
 
         // 💸 10% EARLY BIRD COMMISSION
         if (user.referredBy && !user.hasWithdrawnEver && taskId !== 'daily_bonus') {
@@ -389,6 +438,7 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
             }
         }
 
+        // 🎫 GOLD PASS METER UPDATE
         if (taskId !== 'daily_bonus') {
             user.dailyTaskMeter += finalAmount;
             if (user.dailyTaskMeter >= 50.0 && !user.goldenPassUnlocked) { user.goldenPassUnlocked = true; }
@@ -396,7 +446,10 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 
         await user.save();
         res.json({ success: true, addedAmount: finalAmount, newBalance: user.balance, dailyMeter: user.dailyTaskMeter, isUnlocked: user.goldenPassUnlocked });
-    } catch (e) { res.status(500).json({ error: "Server Error" }); }
+    } catch (e) { 
+        console.error("Update Balance Error:", e);
+        res.status(500).json({ error: "Server Error" }); 
+    }
 });
 
 // 🔔 ROUTE: Naye user ka Notification Token Save karne ke liye
@@ -561,20 +614,20 @@ app.post('/my-transactions', verifyAppSignature, async (req, res) => {
 });
 
 app.post('/bindReferral', verifyAppSignature, async (req, res) => {
-    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const deviceId = req.userEmail; 
     const { hardwareId, promoCode } = req.body;
     try {
-        // 1. Hardware ID Check (Fraud Rokne Ke Liye)
+        // 🛡️ 1. HARDWARE ID BLACKLIST CHECK (The Ultimate Fix)
         if (hardwareId && hardwareId !== "unknown_device") {
-            const existingDevice = await User.findOne({ hardwareId: hardwareId, hasClaimedReferral: true });
-            if (existingDevice && existingDevice.deviceId !== deviceId) {
-                return res.status(400).json({ error: "Device already used for referral!" });
+            const isBlacklisted = await UsedDevice.findOne({ hardwareId: hardwareId });
+            if (isBlacklisted) {
+                console.log(`🚨 FRAUD BLOCKED: ${deviceId} tried double referral claim!`);
+                return res.status(400).json({ error: "Device already used for a VIP Bonus! No double claims." });
             }
         }
         
         let user = await User.findOne({ deviceId });
         
-        // 🔥 FIX: Agar user Database mein nahi hai, toh pehle uska Naya Account banao!
         if (!user) {
             const baseName = deviceId.split('@')[0].toUpperCase();
             user = new User({ deviceId: deviceId, referralCode: "VELO-" + baseName, hardwareId: hardwareId });
@@ -590,7 +643,7 @@ app.post('/bindReferral', verifyAppSignature, async (req, res) => {
 
         // 3. Dost Ko ₹10 Bonus Do
         referrer.balance += 10.00; 
-        referrer.totalInvites += 1; // 📈 Gamification Milestone Track
+        referrer.totalInvites += 1; 
         await referrer.save();
 
         // 4. Naye User ki profile update karo
@@ -598,6 +651,11 @@ app.post('/bindReferral', verifyAppSignature, async (req, res) => {
         user.hardwareId = hardwareId; 
         user.hasClaimedReferral = true; 
         await user.save();
+
+        // 🛡️ 5. PHONE KO HAMESHA KE LIYE BLACKLIST KAR DO
+        if (hardwareId && hardwareId !== "unknown_device") {
+            await new UsedDevice({ hardwareId: hardwareId }).save().catch(() => {}); // Error ignore if already exists
+        }
 
         res.json({ success: true, message: "Referral Applied!" });
     } catch (e) { 
