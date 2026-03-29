@@ -241,7 +241,8 @@ const TASK_REWARDS = {
     'quiz_won': 0.05,
     'news_read': 0.05,
     'daily_bonus': 1.00,
-    'vip_radio_ping': 0.02  // 🚨 NAYA: RAM HACK KILLER! Ab amount server tay karega
+    'vip_radio_ping': 0.02,  // 🚨 NAYA: RAM HACK KILLER! Ab amount server tay karega
+    'scroll_earn': 0.10      // 🚀 VIRAL SHORTS & EARN: Har ad ka 10 Paise fix!
 };
 
 // 🛡️ FIX 1: ADVANCED NONCE CACHE (Replay Attack Killer)
