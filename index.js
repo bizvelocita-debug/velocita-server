@@ -343,13 +343,18 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
         const diff = (now - new Date(user.lastActive)) / 1000;
         
         if (diff > 8) { 
-            // 💸 70/30 SPLIT LOGIC
-            // Pawns rate: ₹16.60/GB. User's 30% share = ₹4.98/GB.
-            // 1 MB = ₹0.005 (User Share). Har ping par itna hi denge!
-            const earning = 0.005; 
+            // 💸 EXACT 30% PROFIT SHARING LOGIC
+            // Pawns pay: ₹16.60/GB. User 30% share = ₹0.00486 per MB
+            const userRatePerMB = 0.00486; 
             
-            // 🚨 PING MEIN BHI LIMIT LAGA DI! (Unlimited Glitch Fixed) (Unlimited Glitch Fixed)
-            if (user.dailyTaskEarnings + earning <= 50.0) {
+            // App background se jitna MB use hua hai, wo 'usage' variable mein bhejegi
+            const actualUsageMB = parseFloat(usage) || 0; 
+            
+            // Earning = Data Used * User Rate
+            let earning = actualUsageMB * userRatePerMB; 
+
+            // Agar koi data use nahi hua, toh paise mat do (Saves you from loss!)
+            if (earning > 0 && user.dailyTaskEarnings + earning <= 50.0) {
                 user.balance += earning;
                 user.dailyTaskEarnings += earning;
                 if (user.referredBy && !user.hasWithdrawnEver) {
