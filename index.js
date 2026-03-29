@@ -327,6 +327,19 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
         }
 
         const now = new Date();
+        const today = now.toISOString().substring(0, 10); 
+
+        // 🔥 Daily Reset Logic (Ping par bhi check hoga)
+        if (user.lastTaskDate !== today) { 
+            user.dailyTaskEarnings = 0; 
+            user.lastTaskDate = today; 
+            user.scratchCountToday = 0; 
+            user.dailyTaskMeter = 0;             // 👈 12 baje 0
+            user.goldenPassUnlocked = false;     // 👈 Pass lock
+            user.isEliminatedToday = false; 
+            await user.save();
+        }
+
         const diff = (now - new Date(user.lastActive)) / 1000;
         
         if (diff > 8) { 
@@ -358,7 +371,7 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
-// B. SECURE UPDATE BALANCE (With Auto-Clicker & Bonus Protection)
+// B. SECURE UPDATE BALANCE (With Auto-Clicker, Bonus & Dynamic Protection)
 app.post('/updateBalance', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail;
     const { taskId, dynamicAmount } = req.body; 
@@ -371,11 +384,14 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         const now = new Date();
         const today = now.toISOString().substring(0, 10); 
 
-        // 🔥 Daily Reset Logic (Naya din shuru hone par sab clear karo)
+        // 🔥 Daily Reset Logic (Fail-safe for Midnight)
         if (user.lastTaskDate !== today) { 
             user.dailyTaskEarnings = 0; 
             user.lastTaskDate = today; 
-            user.scratchCountToday = 0; // Agle din scratch wapas 0 kar do
+            user.scratchCountToday = 0; 
+            user.dailyTaskMeter = 0;             // 👈 Raat 12 baje meter 0 karega
+            user.goldenPassUnlocked = false;     // 👈 Pass lock ho jayega
+            user.isEliminatedToday = false;      // 👈 Game status reset
         }
 
         // 🛑 1. DAILY BONUS HACK BLOCKER
@@ -393,38 +409,51 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
                 console.log(`🚨 SCRATCH HACK ATTEMPT by ${deviceId}`);
                 return res.status(429).json({ error: "🚫 Daily Scratch Limit Reached!" });
             }
-            user.scratchCountToday += 1; // Ginti badha di
+            user.scratchCountToday += 1; 
         }
 
-        // 🛑 3. RATE LIMITING (Auto-Clicker & Radio Speed Hack Blocker)
+        // 🛑 3. RATE LIMITING
         if (user.lastTaskTime) {
             const timeDiff = (now - user.lastTaskTime) / 1000; 
             
             if (taskId === 'vip_radio_ping') {
                 if (timeDiff < 55) return res.status(429).json({ error: "⏳ Radio Speed Hack Detected!" });
-            } else if (taskId !== 'daily_bonus' && taskId !== 'scratch_card') {
+            } else if (taskId !== 'daily_bonus' && taskId !== 'scratch_card' && !taskId.includes("Flash Task")) {
                 if (timeDiff < 5) return res.status(429).json({ error: "⏳ Too fast! System cooling down." }); 
             }
         }
 
-        // 💰 REWARD ASSIGNMENT
+        // 💰 REWARD ASSIGNMENT (The Fix)
         let finalAmount = 0;
+        
         if (taskId === 'scratch_card') {
             finalAmount = parseFloat((Math.random() * 0.07 + 0.02).toFixed(2));
         } else if (TASK_REWARDS[taskId]) {
+            // Static Tasks (Math, Quiz, etc)
             finalAmount = TASK_REWARDS[taskId]; 
+        } else if (taskId.startsWith("Flash Task") || taskId === 'unknown') {
+            // 🔥 FIX: Accept dynamic amount from App for verified Flash tasks
+            // Hacker isko misuse na kare isliye check lagaya: Max dynamic limit ₹50 ek baar mein
+            const reqAmount = parseFloat(dynamicAmount) || 0;
+            if (reqAmount > 0 && reqAmount <= 50) {
+                finalAmount = reqAmount;
+            } else {
+                return res.status(400).json({ error: "Invalid Dynamic Amount" });
+            }
         } else {
             return res.status(400).json({ error: "Invalid Task ID" });
         }
 
         // 🛑 MAX DAILY LIMIT CHECK (Taaki app bankrupt na ho)
-        if (user.dailyTaskEarnings + finalAmount > 50.0) {
+        if (user.dailyTaskEarnings + finalAmount > 50.0 && taskId !== 'daily_bonus') {
             return res.status(429).json({ error: "Daily limit reached. Use Premium Offers for unlimited earning!" });
         }
 
         // 🧮 BALANCE UPDATE
         user.balance = parseFloat((user.balance + finalAmount).toFixed(4));
-        user.dailyTaskEarnings = parseFloat((user.dailyTaskEarnings + finalAmount).toFixed(4));
+        if (taskId !== 'daily_bonus') {
+            user.dailyTaskEarnings = parseFloat((user.dailyTaskEarnings + finalAmount).toFixed(4));
+        }
         user.lastTaskTime = now; 
 
         // 💸 10% EARLY BIRD COMMISSION
