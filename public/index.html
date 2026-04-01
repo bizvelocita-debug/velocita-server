@@ -323,7 +323,7 @@
                     <td>${new Date(p.date).toLocaleDateString()}</td>
                     <td style="color:white;">${p.deviceId}</td>
                     <td style="color: #00ff41; font-weight:bold;">₹${p.amount.toFixed(2)}</td>
-                    <td style="color: var(--warning);">${p.details}</td>
+                    <td style="color: var(--warning);"><strong style="color:white;">${p.method}</strong><br>${p.details}</td>
                     <td>${statusBadge || actionHtml}</td>
                 </tr>`;
             });
