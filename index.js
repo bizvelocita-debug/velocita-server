@@ -39,6 +39,46 @@ try {
 const db = admin.database();
 
 // ==========================================
+// 🔥 REDIS SETUP (WITH BULLETPROOF FALLBACK)
+// ==========================================
+const redis = require('redis');
+const redisClient = redis.createClient({ 
+    url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' 
+});
+
+let isRedisConnected = false; 
+
+redisClient.on('error', (err) => {
+    console.log('❌ Redis Error (Falling back to MongoDB):', err.message);
+    isRedisConnected = false;
+});
+
+redisClient.on('connect', () => {
+    console.log('⚡ REDIS CONNECTED (Cache Engine Ready!)');
+    isRedisConnected = true;
+});
+
+redisClient.connect().catch(() => {
+    console.log("⚠️ Could not connect to Redis initially. Continuing with MongoDB only.");
+});
+
+// 🛡️ CUSTOM HELPERS: Safe Redis Functions (Crash hone nahi denge)
+const safeRedisGet = async (key) => {
+    if (!isRedisConnected) return null;
+    try { return await redisClient.get(key); } catch(e) { return null; }
+};
+
+const safeRedisSet = async (key, value, options) => {
+    if (!isRedisConnected) return;
+    try { await redisClient.set(key, value, options); } catch(e) {}
+};
+
+const safeRedisDel = async (key) => {
+    if (!isRedisConnected) return;
+    try { await redisClient.del(key); } catch(e) {}
+};
+
+// ==========================================
 // 1. DATABASE CONNECTION (MongoDB)
 // ==========================================
 const MONGO_URI = process.env.MONGO_URI; 
@@ -241,20 +281,10 @@ const TASK_REWARDS = {
     'quiz_won': 0.05,
     'news_read': 0.05,
     'daily_bonus': 1.00,
-    'vip_radio_ping': 0.02,  // 🚨 NAYA: RAM HACK KILLER! Ab amount server tay karega
-    'scroll_earn': 0.10      // 🚀 VIRAL SHORTS & EARN: Har ad ka 10 Paise fix!
+    'vip_radio_ping': 0.02  // 🚨 NAYA: RAM HACK KILLER! Ab amount server tay karega
 };
 
-// 🛡️ FIX 1: ADVANCED NONCE CACHE (Replay Attack Killer)
-const usedNonces = new Map();
-const NONCE_TTL = 60 * 1000; // 60 seconds expiry
-// Ye loop sirf EXPIRE hue nonces ko delete karega, poori memory saaf nahi karega
-setInterval(() => {
-    const now = Date.now();
-    for (let [nonce, timestamp] of usedNonces.entries()) {
-        if (now - timestamp > NONCE_TTL) usedNonces.delete(nonce);
-    }
-}, 10 * 1000); // Har 10 second mein check karega
+
 const verifyAppSignature = async (req, res, next) => {
     const signature = req.headers['x-velo-signature'];
     const timestamp = req.headers['x-velo-timestamp'];
@@ -280,14 +310,17 @@ const verifyAppSignature = async (req, res, next) => {
 
     // 2. REPLAY ATTACK CHECK (Time Machine Killer - 60s Strict Window)
     const now = Date.now();
-    if (Math.abs(now - parseInt(timestamp)) > 60000) { // 👈 120s se 60s kar diya
+    if (Math.abs(now - parseInt(timestamp)) > 60000) { 
         return res.status(403).json({ error: "🛑 EXPIRED REQUEST" });
     }
-    if (usedNonces.has(nonce)) {
+    
+    // 🔥 REDIS NONCE CACHE (Memory Leak Fix)
+    const isNonceUsed = await redisClient.get(`nonce_${nonce}`);
+    if (isNonceUsed) {
         console.log(`🚨 REPLAY ATTACK BLOCKED from ${req.userEmail}`);
         return res.status(403).json({ error: "🛑 REQUEST ALREADY USED!" });
     }
-    usedNonces.set(nonce, now); // 👈 Map mein time ke sath save kiya
+    await redisClient.set(`nonce_${nonce}`, "used", { EX: 60 });
 
     // 3. HMAC SIGNATURE CHECK (Tamper Proofing)
     const payload = req.rawBody || ""; // 🎯 FIXED: Ab exact wahi data check hoga jo app ne bheja tha
@@ -313,68 +346,88 @@ const verifyAppSignature = async (req, res, next) => {
 
 app.get('/', (req, res) => { res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳"); });
 
-// A. PING (Now Secured!)
+// A. PING (Now Secured & Redis Cached! ⚡)
 app.post('/ping', verifyAppSignature, async (req, res) => {
-    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
+    const deviceId = req.userEmail; 
     const { usage } = req.body;
     if (!deviceId) return res.status(400).json({ error: "No ID" });
 
     try {
-        let user = await User.findOne({ deviceId });
-        if (!user) {
-            const baseName = deviceId.split('@')[0].toUpperCase();
-            user = new User({ deviceId, referralCode: "VELO-" + baseName });
-            await user.save();
+        let user;
+        const redisKey = `user_${deviceId}`;
+
+        // ⚡ 1. TRY REDIS FIRST
+        const cachedUser = await redisClient.get(redisKey);
+
+        if (cachedUser) {
+            user = JSON.parse(cachedUser); 
+        } else {
+            // 🐢 2. CACHE MISS: MONGODB SE LO
+            user = await User.findOne({ deviceId }).lean(); 
+            
+            if (!user) {
+                const baseName = deviceId.split('@')[0].toUpperCase();
+                const newUser = new User({ deviceId, referralCode: "VELO-" + baseName });
+                await newUser.save();
+                user = newUser.toObject();
+            }
         }
 
         const now = new Date();
         const today = now.toISOString().substring(0, 10); 
+        let needsDbUpdate = false; 
 
-        // 🔥 Daily Reset Logic (Ping par bhi check hoga)
+        // 🔥 Daily Reset Logic
         if (user.lastTaskDate !== today) { 
             user.dailyTaskEarnings = 0; 
             user.lastTaskDate = today; 
             user.scratchCountToday = 0; 
-            user.dailyTaskMeter = 0;             // 👈 12 baje 0
-            user.goldenPassUnlocked = false;     // 👈 Pass lock
+            user.dailyTaskMeter = 0;             
+            user.goldenPassUnlocked = false;     
             user.isEliminatedToday = false; 
-            await user.save();
+            needsDbUpdate = true;
         }
 
         const diff = (now - new Date(user.lastActive)) / 1000;
         
         if (diff > 8) { 
-            // 💸 EXACT 30% PROFIT SHARING LOGIC
-            // Pawns pay: ₹16.60/GB. User 30% share = ₹0.00486 per MB
             const userRatePerMB = 0.00486; 
-            
-            // App background se jitna MB use hua hai, wo 'usage' variable mein bhejegi
             const actualUsageMB = parseFloat(usage) || 0; 
-            
-            // Earning = Data Used * User Rate
             let earning = actualUsageMB * userRatePerMB; 
 
-            // Agar koi data use nahi hua, toh paise mat do (Saves you from loss!)
             if (earning > 0 && user.dailyTaskEarnings + earning <= 50.0) {
                 user.balance += earning;
                 user.dailyTaskEarnings += earning;
+                needsDbUpdate = true;
+                
                 if (user.referredBy && !user.hasWithdrawnEver) {
                     const upline = await User.findOne({ deviceId: user.referredBy });
                     if (upline) { upline.balance += (earning * 0.10); await upline.save(); }
                 }
             }
-            user.lastActive = now;
         }
 
-        if (usage) user.totalData = usage;
-        await user.save();
+        if (usage && user.totalData !== usage) { 
+            user.totalData = usage; 
+            needsDbUpdate = true; 
+        }
+        
+        // 💾 3. DATA CHANGE HUA HAI TOH DB AUR REDIS UPDATE KARO
+        if (needsDbUpdate) {
+            user.lastActive = now;
+            await User.updateOne({ deviceId }, { $set: user }); 
+            await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 }); 
+        }
 
         res.json({ 
-            status: "active", balance: user.balance.toFixed(4), upiId: user.upiId,
-            dailyTaskMeter: user.dailyTaskMeter, isPassUnlocked: user.goldenPassUnlocked,
+            status: "active", balance: parseFloat(user.balance).toFixed(4), 
+            upiId: user.upiId, dailyTaskMeter: user.dailyTaskMeter, 
+            isPassUnlocked: user.goldenPassUnlocked,
             totalInvites: user.totalInvites, networkEarnings: user.networkEarnings
         });
-    } catch (e) { res.status(500).json({ error: "Server Error" }); }
+    } catch (e) { 
+        res.status(500).json({ error: "Server Error" }); 
+    }
 });
 
 // B. SECURE UPDATE BALANCE (With Auto-Clicker, Bonus & Dynamic Protection)
@@ -480,6 +533,11 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         }
 
         await user.save();
+        
+        // 🔥 NAYA: UPDATE REDIS CACHE SO NEXT PING GETS NEW BALANCE
+        const redisKey = `user_${deviceId}`;
+        await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 }); 
+
         res.json({ success: true, addedAmount: finalAmount, newBalance: user.balance, dailyMeter: user.dailyTaskMeter, isUnlocked: user.goldenPassUnlocked });
     } catch (e) { 
         console.error("Update Balance Error:", e);
@@ -545,6 +603,11 @@ app.get('/postback', async (req, res) => {
         }
 
         await user.save();
+        
+        // 🔥 NAYA: Redis update karo offerwall earnings ke liye
+        const redisKey = `user_${deviceId}`;
+        await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 });
+
         console.log(`✅ POSTBACK SUCCESS: ₹${amount} added to ${deviceId}`);
         
         res.status(200).send("1"); // Network ko '1' (Success) bhejna zaroori hai
@@ -584,6 +647,11 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
             user.balance += 50.00; 
             user.lastArenaWinDate = today;
             await user.save();
+            
+            // 🔥 NAYA: Redis update karo taaki turant 50 Rs dikhein
+            const redisKey = `user_${deviceId}`;
+            await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 });
+
             return res.json({ success: true, message: "Winner! ₹50 Added." });
         }
 
@@ -617,6 +685,10 @@ app.post('/withdraw', verifyAppSignature, async (req, res) => {
         // Ab database mein Payout ki entry daalo
         const newPayout = new Payout({ deviceId, amount: requestedAmount, method, details });
         await newPayout.save();
+
+        // 🔥 NAYA: Redis ko batao ki paise kat gaye hain
+        const redisKey = `user_${deviceId}`;
+        await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 });
 
         res.json({ status: "success", message: "Request Sent to Admin!" });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -680,12 +752,14 @@ app.post('/bindReferral', verifyAppSignature, async (req, res) => {
         referrer.balance += 10.00; 
         referrer.totalInvites += 1; 
         await referrer.save();
+        await redisClient.set(`user_${referrer.deviceId}`, JSON.stringify(referrer), { EX: 3600 }); // 🔥 NAYA
 
         // 4. Naye User ki profile update karo
         user.referredBy = referrer.deviceId; 
         user.hardwareId = hardwareId; 
         user.hasClaimedReferral = true; 
         await user.save();
+        await redisClient.set(`user_${deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
 
         // 🛡️ 5. PHONE KO HAMESHA KE LIYE BLACKLIST KAR DO
         if (hardwareId && hardwareId !== "unknown_device") {
@@ -708,6 +782,8 @@ app.post('/deleteUser', verifyAppSignature, async (req, res) => {
         if (!deletedUser) {
             return res.status(404).json({ error: "User not found" });
         }
+        await redisClient.del(`user_${deviceId}`); // 🔥 NAYA: Redis se bhi uda do
+        
         
         // Agar uska koi pending payout hai, usko bhi delete kar sakte ho (Optional but good practice)
         await Payout.deleteMany({ deviceId: deviceId, status: "Pending" });
@@ -769,6 +845,7 @@ app.post('/admin/reject', adminAuth, async (req, res) => {
         if (user) {
             user.balance += payout.amount;
             await user.save();
+            await redisClient.set(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
         }
 
         // Payout ko cancel kar do
@@ -802,7 +879,11 @@ app.post('/admin/update-solar-lead', adminAuth, async (req, res) => {
 
         if (newStatus === "Paid") {
             const user = await User.findOne({ deviceId: lead.submittedBy });
-            if (user) { user.balance += 1500.00; await user.save(); }
+            if (user) { 
+                user.balance += 1500.00; 
+                await user.save(); 
+                await redisClient.set(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
+            }
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: "Error" }); }
