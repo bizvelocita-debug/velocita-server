@@ -3,173 +3,292 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Velocita Command Center | God Mode</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <title>Velocita | Operations Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary: #00ff41; /* Mining Green */
-            --secondary: #03a9f4; /* Wallet Blue */
-            --solar: #FFD700; /* Solar Gold */
-            --jackpot: #ff00ff; /* NEW: Jackpot Neon Purple */
-            --bg: #050505;
-            --panel: #0a0a0a;
-            --border: #333;
-            --warning: #ffab00;
-            --danger: #ff1744;
+            /* Premium Fintech Palette */
+            --bg-color: #0F172A; /* Deep Slate */
+            --panel-bg: #1E293B; /* Slate 800 */
+            --text-main: #F8FAFC;
+            --text-muted: #94A3B8;
+            --accent-blue: #3B82F6; /* Trust Blue */
+            --accent-green: #10B981; /* Success Emerald */
+            --accent-amber: #F59E0B; /* Golden Amber */
+            --accent-red: #EF4444; /* Danger Red */
+            --border-color: #334155;
         }
-        body {
-            background-color: var(--bg);
-            color: #e0e0e0;
-            font-family: 'Roboto Mono', monospace;
-            margin: 0;
-            padding: 20px;
-            background-image: linear-gradient(rgba(0, 255, 65, 0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0, 255, 65, 0.03) 1px, transparent 1px);
-            background-size: 30px 30px;
-        }
-        h1 {
-            font-family: 'Orbitron', sans-serif;
-            color: var(--primary);
-            text-align: center;
-            text-transform: uppercase;
-            letter-spacing: 3px;
-            text-shadow: 0 0 10px var(--primary);
-            margin-bottom: 30px;
-        }
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            max-width: 1200px;
-            margin: 0 auto 30px auto;
-        }
-        .card {
-            background: var(--panel);
-            border: 1px solid var(--primary);
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
-            text-align: center;
-            position: relative;
-        }
-        .card.solar-card { border: 1px solid var(--solar); box-shadow: 0 0 15px rgba(255, 215, 0, 0.2); }
-        .card.jackpot-card { border: 1px solid var(--jackpot); box-shadow: 0 0 15px rgba(255, 0, 255, 0.2); }
-        .card.payout-card { border: 1px solid var(--warning); box-shadow: 0 0 15px rgba(255, 171, 0, 0.2); }
-        
-        .card h3 { color: #888; font-size: 13px; margin: 0 0 10px 0; }
-        .card .value { font-size: 32px; font-weight: bold; color: #fff; }
-        
-        .money { color: var(--secondary) !important; text-shadow: 0 0 10px var(--secondary); }
-        .solar-money { color: var(--solar) !important; text-shadow: 0 0 10px var(--solar); }
-        .jackpot-color { color: var(--jackpot) !important; text-shadow: 0 0 10px var(--jackpot); }
-        .payout-color { color: var(--warning) !important; text-shadow: 0 0 10px var(--warning); }
 
-        .section-title {
-            max-width: 1200px;
-            margin: 40px auto 10px auto;
-            color: var(--primary);
-            font-family: 'Orbitron', sans-serif;
-            border-left: 4px solid var(--primary);
-            padding-left: 10px;
+        * { box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            margin: 0;
+            padding: 30px;
+        }
+
+        .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-        }
-        .section-title.solar-title { color: var(--solar); border-color: var(--solar); }
-        .section-title.jackpot-title { color: var(--jackpot); border-color: var(--jackpot); text-shadow: 0 0 10px var(--jackpot); }
-
-        .table-container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto 40px auto;
-            border: 1px solid #333;
-            background: var(--panel);
-            overflow-x: auto;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
         }
-        table { width: 100%; border-collapse: collapse; min-width: 800px; }
-        th { background: #111; color: var(--primary); padding: 15px; text-align: left; border-bottom: 2px solid var(--primary); }
-        .solar-table th { color: var(--solar); border-bottom: 2px solid var(--solar); }
-        td { padding: 15px; border-bottom: 1px solid #222; color: #ccc; }
-        tr:hover { background-color: rgba(0, 255, 65, 0.05); }
 
-        .status-dot { height: 10px; width: 10px; background-color: #555; border-radius: 50%; display: inline-block; margin-right: 8px; }
-        .online { background-color: var(--primary); box-shadow: 0 0 8px var(--primary); }
+        h1 {
+            font-weight: 800;
+            font-size: 24px;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: 1px;
+        }
+
+        .badge {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--accent-blue);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            font-size: 10px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-family: 'Space Mono', monospace;
+            font-weight: 700;
+        }
+
+        .refresh-btn {
+            background: var(--accent-blue);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+
+        .refresh-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4); }
+
+        /* Dashboard Metrics */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto 40px auto;
+        }
+
+        .card {
+            background: var(--panel-bg);
+            padding: 25px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h3 {
+            color: var(--text-muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 0 0 15px 0;
+        }
+
+        .card .value {
+            font-family: 'Space Mono', monospace;
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .text-green { color: var(--accent-green); }
+        .text-amber { color: var(--accent-amber); }
+        .text-blue { color: var(--accent-blue); }
+
+        .sub-text { font-size: 12px; color: var(--text-muted); }
+
+        /* Sections */
+        .section-title {
+            max-width: 1400px;
+            margin: 40px auto 15px auto;
+            font-size: 16px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Tables */
+        .table-container {
+            max-width: 1400px;
+            margin: 0 auto 40px auto;
+            background: var(--panel-bg);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            overflow: hidden; /* For rounded corners */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
         
-        .btn { border: none; padding: 8px 12px; cursor: pointer; font-weight: bold; font-family: 'Orbitron', sans-serif; font-size: 12px; border-radius: 3px; transition: all 0.3s; }
-        .payout-btn { background: var(--primary); color: black; }
-        .payout-btn:hover { background: #fff; box-shadow: 0 0 10px #fff; }
-        .verify-btn { background: var(--secondary); color: white; margin-right: 5px;}
-        .solar-pay-btn { background: var(--solar); color: black; }
+        th { 
+            background: rgba(15, 23, 42, 0.5); /* Darker header */
+            color: var(--text-muted); 
+            padding: 16px 20px; 
+            text-align: left; 
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--border-color); 
+        }
+
+        td { 
+            padding: 16px 20px; 
+            border-bottom: 1px solid var(--border-color); 
+            vertical-align: middle;
+        }
+
+        tr:last-child td { border-bottom: none; }
+        tr:hover { background-color: rgba(255, 255, 255, 0.02); }
+
+        .status-dot { 
+            height: 8px; width: 8px; 
+            background-color: var(--text-muted); 
+            border-radius: 50%; 
+            display: inline-block; 
+            margin-right: 8px; 
+        }
+        .online { background-color: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
         
-        /* New Form Inputs */
-        .q-form { padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .q-form input, .q-form select { background: #000; border: 1px solid #333; color: white; padding: 12px; font-family: 'Roboto Mono'; width: 100%; box-sizing: border-box; }
-        .q-form input:focus, .q-form select:focus { border-color: var(--jackpot); outline: none; }
+        .code-text { font-family: 'Space Mono', monospace; font-weight: 700; }
+
+        /* Buttons inside table */
+        .btn { 
+            border: none; padding: 8px 16px; 
+            cursor: pointer; font-weight: 600; 
+            font-size: 11px; border-radius: 6px; 
+            transition: all 0.2s;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+        .btn-pay { background: rgba(16, 185, 129, 0.1); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .btn-pay:hover { background: var(--accent-green); color: white; }
+        
+        .btn-reject { background: rgba(239, 68, 68, 0.1); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.3); margin-left: 5px; }
+        .btn-reject:hover { background: var(--accent-red); color: white; }
+
+        .btn-verify { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); border: 1px solid rgba(59, 130, 246, 0.3); margin-right: 5px;}
+        .btn-verify:hover { background: var(--accent-blue); color: white; }
+
+        /* KBC Vault Form */
+        .q-form { padding: 25px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        
+        .input-group { display: flex; flex-direction: column; gap: 8px; }
+        .input-group label { color: var(--text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+        
+        .q-form input, .q-form select { 
+            background: #0F172A; 
+            border: 1px solid var(--border-color); 
+            color: white; padding: 12px 15px; 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            border-radius: 8px;
+            font-size: 13px;
+        }
+        .q-form input:focus, .q-form select:focus { border-color: var(--accent-blue); outline: none; }
         .q-form .full-width { grid-column: span 2; }
-        .submit-q-btn { background: var(--jackpot); color: white; padding: 15px; font-size: 16px; margin-top: 10px; width: 100%; }
-        .submit-q-btn:hover { background: #fff; color: var(--jackpot); box-shadow: 0 0 15px var(--jackpot); }
+        
+        .submit-q-btn { 
+            background: var(--accent-blue); color: white; 
+            padding: 15px; font-size: 13px; font-weight: 600; 
+            border-radius: 8px; border: none; cursor: pointer;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+            transition: all 0.2s;
+        }
+        .submit-q-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4); }
 
-        .refresh-btn { display: block; margin: 20px auto; background: transparent; color: var(--primary); border: 2px solid var(--primary); padding: 10px 30px; font-family: 'Orbitron', sans-serif; cursor: pointer; text-transform: uppercase; }
-        .refresh-btn:hover { background: var(--primary); color: #000; box-shadow: 0 0 20px var(--primary); }
+        .deal-badge {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--accent-amber);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 800; display: inline-block; margin-bottom: 4px;
+        }
     </style>
 </head>
 <body>
 
-    <h1>🚀 VELOCITA COMMAND CENTER <span style="font-size:12px; vertical-align:middle; border:1px solid var(--primary); padding:2px 5px; border-radius:3px;">GOD MODE</span></h1>
+    <div class="header">
+        <h1>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-blue);"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            Velocita Ops Center <span class="badge">SECURE CONNECTION</span>
+        </h1>
+        <button class="refresh-btn" onclick="loadAllData()">Sync Data Now</button>
+    </div>
 
     <div class="dashboard-grid">
         <div class="card">
-            <h3>TOTAL NODES</h3>
+            <h3>Total Users</h3>
             <div class="value" id="userCount">0</div>
+            <div class="sub-text">Registered nodes</div>
         </div>
         <div class="card">
-            <h3>NETWORK LIABILITIES</h3>
-            <div class="value money">₹<span id="totalMoney">0.00</span></div>
+            <h3>Network Liability</h3>
+            <div class="value text-green">₹<span id="totalMoney">0.00</span></div>
+            <div class="sub-text">Total user balance</div>
         </div>
-        <div class="card payout-card">
-            <h3>💸 PENDING PAYOUTS</h3>
-            <div class="value payout-color" id="pendingCount">0</div>
+        <div class="card">
+            <h3>Pending Withdrawals</h3>
+            <div class="value text-red" id="pendingCount">0</div>
+            <div class="sub-text">Requires attention</div>
         </div>
-        <div class="card solar-card">
-            <h3>☀️ PENDING SOLAR</h3>
-            <div class="value solar-money" id="solarCount">0</div>
+        <div class="card">
+            <h3>Solar Leads</h3>
+            <div class="value text-blue" id="solarCount">0</div>
+            <div class="sub-text">Pending verification</div>
         </div>
-        <div class="card jackpot-card">
-            <h3>🎟️ GOLDEN PASSES (TODAY)</h3>
-            <div class="value jackpot-color" id="passCount">0</div>
-            <p style="font-size:12px; color:#888; margin-top:10px;">Est. Prize Pool: <strong style="color:var(--jackpot);">₹<span id="estPool">0</span></strong></p>
+        <div class="card">
+            <h3>Golden Passes</h3>
+            <div class="value text-amber" id="passCount">0</div>
+            <div class="sub-text">Prize Pool: ₹<span id="estPool">0</span></div>
         </div>
     </div>
 
-    <button class="refresh-btn" onclick="loadAllData()">🔄 SYNC GLOBAL DATA</button>
-
-    <div class="section-title jackpot-title">
-        🔮 THE VAULT: ADD NEW LIVE QUESTION
+    <div class="section-title text-amber">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        Live Arena Data Vault
     </div>
     <div class="table-container">
         <div class="q-form">
-            <div class="full-width">
-                <label style="color:#888; font-size:12px;">Question (English):</label>
+            <div class="full-width input-group">
+                <label>Question (English)</label>
                 <input type="text" id="q_en" placeholder="e.g. Which planet is known as the Red Planet?">
             </div>
-            <div><label style="color:#888; font-size:12px;">EN Option A:</label><input type="text" id="opt_en_a" placeholder="Earth"></div>
-            <div><label style="color:#888; font-size:12px;">EN Option B:</label><input type="text" id="opt_en_b" placeholder="Mars"></div>
-            <div><label style="color:#888; font-size:12px;">EN Option C:</label><input type="text" id="opt_en_c" placeholder="Jupiter"></div>
-            <div><label style="color:#888; font-size:12px;">EN Option D:</label><input type="text" id="opt_en_d" placeholder="Venus"></div>
+            <div class="input-group"><label>Option A (EN)</label><input type="text" id="opt_en_a" placeholder="Earth"></div>
+            <div class="input-group"><label>Option B (EN)</label><input type="text" id="opt_en_b" placeholder="Mars"></div>
+            <div class="input-group"><label>Option C (EN)</label><input type="text" id="opt_en_c" placeholder="Jupiter"></div>
+            <div class="input-group"><label>Option D (EN)</label><input type="text" id="opt_en_d" placeholder="Venus"></div>
             
-            <hr class="full-width" style="border-color: #222; margin: 10px 0;">
+            <hr class="full-width" style="border-color: var(--border-color); margin: 10px 0;">
 
-            <div class="full-width">
-                <label style="color:#888; font-size:12px;">Question (Hindi):</label>
+            <div class="full-width input-group">
+                <label>Question (Hindi)</label>
                 <input type="text" id="q_hi" placeholder="उदाहरण: किस ग्रह को लाल ग्रह कहा जाता है?">
             </div>
-            <div><label style="color:#888; font-size:12px;">HI Option A:</label><input type="text" id="opt_hi_a" placeholder="पृथ्वी"></div>
-            <div><label style="color:#888; font-size:12px;">HI Option B:</label><input type="text" id="opt_hi_b" placeholder="मंगल"></div>
-            <div><label style="color:#888; font-size:12px;">HI Option C:</label><input type="text" id="opt_hi_c" placeholder="बृहस्पति"></div>
-            <div><label style="color:#888; font-size:12px;">HI Option D:</label><input type="text" id="opt_hi_d" placeholder="शुक्र"></div>
+            <div class="input-group"><label>Option A (HI)</label><input type="text" id="opt_hi_a" placeholder="पृथ्वी"></div>
+            <div class="input-group"><label>Option B (HI)</label><input type="text" id="opt_hi_b" placeholder="मंगल"></div>
+            <div class="input-group"><label>Option C (HI)</label><input type="text" id="opt_hi_c" placeholder="बृहस्पति"></div>
+            <div class="input-group"><label>Option D (HI)</label><input type="text" id="opt_hi_d" placeholder="शुक्र"></div>
             
-            <div class="full-width" style="display:flex; gap:15px; align-items:flex-end; margin-top: 15px;">
-                <div style="flex:1;">
-                    <label style="color:var(--jackpot); font-weight:bold; font-size:14px;">Secret Correct Answer:</label>
+            <div class="full-width" style="display:flex; gap:20px; align-items:flex-end; margin-top: 10px;">
+                <div class="input-group" style="flex:1;">
+                    <label style="color:var(--text-main);">Correct Answer</label>
                     <select id="correct_ans">
                         <option value="A">Option A</option>
                         <option value="B">Option B</option>
@@ -177,56 +296,58 @@
                         <option value="D">Option D</option>
                     </select>
                 </div>
-                <button class="btn submit-q-btn" style="flex:2;" onclick="submitQuestion()">💾 ADD TO VAULT (Zero Repeat)</button>
+                <button class="submit-q-btn" style="flex:2;" onclick="submitQuestion()">Secure to Vault (Zero Repeat Logic)</button>
             </div>
         </div>
     </div>
 
-    <div class="section-title solar-title">☀️ SOLAR MASTER CONTROL (Auto-Pay ₹1500)</div>
-    <div class="table-container solar-table">
-        <table>
-            <thead>
-                <tr>
-                    <th>DATE</th>
-                    <th>SUBMITTED BY</th>
-                    <th>CUSTOMER INFO</th>
-                    <th>CITY & BILL</th>
-                    <th>STATUS</th>
-                    <th>ACTION</th>
-                </tr>
-            </thead>
-            <tbody id="solarTable">
-                <tr><td colspan="6" style="text-align:center;">Scanning solar leads...</td></tr>
-            </tbody>
-        </table>
-    </div>
-
-    <div class="section-title">
-        💸 WITHDRAWAL HISTORY
+    <div class="section-title text-red">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+        Withdrawal Requests
     </div>
     <div class="table-container">
         <table>
             <thead>
                 <tr>
-                    <th>DATE</th><th>USER EMAIL</th><th>AMOUNT</th><th>DETAILS</th><th>STATUS / ACTION</th>
+                    <th>Date</th><th>User Email</th><th>Amount</th><th>Details</th><th>Status / Action</th>
                 </tr>
             </thead>
             <tbody id="payoutTable">
-                <tr><td colspan="5" style="text-align:center;">Scanning records...</td></tr>
+                <tr><td colspan="5" style="text-align:center; padding: 30px;">Loading records...</td></tr>
             </tbody>
         </table>
     </div>
 
-    <div class="section-title">📡 ACTIVE NETWORK NODES</div>
+    <div class="section-title text-blue">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+        Corporate Solar Leads
+    </div>
     <div class="table-container">
         <table>
             <thead>
                 <tr>
-                    <th>STATUS</th><th>DEVICE ID (EMAIL)</th><th>BALANCE</th><th>METER (₹50)</th><th>LAST PING</th>
+                    <th>Date</th><th>Submitted By</th><th>Customer Info</th><th>Location & Bill</th><th>Deal Info</th><th>Status</th><th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="solarTable">
+                <tr><td colspan="7" style="text-align:center; padding: 30px;">Scanning leads...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section-title text-green">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        Active Network Nodes
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Status</th><th>Device ID (Email)</th><th>Balance</th><th>Meter (₹50)</th><th>Last Active</th>
                 </tr>
             </thead>
             <tbody id="userTable">
-                <tr><td colspan="5" style="text-align:center; padding:20px;">Scanning Network...</td></tr>
+                <tr><td colspan="5" style="text-align:center; padding: 30px;">Scanning Network...</td></tr>
             </tbody>
         </table>
     </div>
@@ -242,8 +363,7 @@
 
         async function loadAllData() {
             try {
-                // The browser will automatically attach the Basic Auth header after the first prompt.
-                const options = {}; 
+                const options = {}; // Add headers if adminAuth uses Bearer tokens later
 
                 const userRes = await fetch(USERS_URL, options);
                 if (!userRes.ok) throw new Error("Auth Failed");
@@ -258,7 +378,7 @@
                 updateUI(users, payouts, solarLeads);
             } catch (error) {
                 console.error("Sync Error:", error);
-                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:red;'>🔒 Access Denied!</td></tr>";
+                document.getElementById("userTable").innerHTML = "<tr><td colspan='5' style='text-align:center; color:var(--accent-red); padding: 30px;'>🔒 Access Denied or Server Offline</td></tr>";
             }
         }
 
@@ -275,60 +395,60 @@
                 const lastActive = new Date(user.lastActive);
                 const isOnline = (new Date() - lastActive) / 1000 / 60 < 5; 
 
-                let meterColor = user.goldenPassUnlocked ? "var(--jackpot)" : "#ccc";
+                let meterColor = user.goldenPassUnlocked ? "var(--accent-amber)" : "var(--text-muted)";
                 let meterText = user.goldenPassUnlocked ? "🎟️ UNLOCKED" : `₹${(user.dailyTaskMeter || 0).toFixed(2)}`;
 
                 userHtml += `
                     <tr>
-                        <td><span class="status-dot ${isOnline ? 'online' : ''}"></span> ${isOnline ? 'ONLINE' : 'OFFLINE'}</td>
-                        <td style="color:white;">${user.deviceId}</td>
-                        <td style="color: var(--secondary); font-weight:bold;">₹${user.balance.toFixed(4)}</td>
-                        <td style="color: ${meterColor}; font-weight:bold;">${meterText}</td>
-                        <td>${lastActive.toLocaleTimeString()}</td>
+                        <td><span class="status-dot ${isOnline ? 'online' : ''}"></span> ${isOnline ? 'Online' : 'Offline'}</td>
+                        <td style="color: white; font-weight: 600;">${user.deviceId}</td>
+                        <td class="code-text" style="color: var(--accent-green);">₹${user.balance.toFixed(4)}</td>
+                        <td class="code-text" style="color: ${meterColor};">${meterText}</td>
+                        <td style="color: var(--text-muted); font-size: 12px;">${lastActive.toLocaleTimeString()}</td>
                     </tr>
                 `;
             });
 
             // Update Stats
             document.getElementById("userCount").innerText = users.length;
-            document.getElementById("totalMoney").innerText = totalBal.toFixed(4);
+            document.getElementById("totalMoney").innerText = totalBal.toFixed(2);
             document.getElementById("passCount").innerText = goldenPassCount;
-            
             document.getElementById("estPool").innerText = (goldenPassCount * 50).toFixed(2); 
-            
-            document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5'>No users</td></tr>";
+            document.getElementById("userTable").innerHTML = userHtml || "<tr><td colspan='5' style='text-align:center; padding: 20px;'>No active users</td></tr>";
 
-            // Render Payouts (With Auto Status Check)
+            // Render Payouts
             let payoutHtml = "";
             let pendingPayouts = 0;
             payouts.forEach(p => {
                 let isPaid = p.status === 'Paid';
-                if(!isPaid) pendingPayouts++;
+                if(!isPaid && p.status !== 'Rejected') pendingPayouts++;
 
                 let statusBadge = "";
                 let actionHtml = "";
                 
                 if (p.status === 'Paid') {
-                    statusBadge = `<span style="color:var(--primary); font-weight:bold;">🟢 PAID</span>`;
+                    statusBadge = `<span style="color:var(--accent-green); font-weight:600; font-size: 11px;"><svg width="12" height="12" style="vertical-align:text-bottom;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> PAID</span>`;
                 } else if (p.status === 'Rejected') {
-                    statusBadge = `<span style="color:var(--danger); font-weight:bold;">🔴 REJECTED</span>`;
+                    statusBadge = `<span style="color:var(--accent-red); font-weight:600; font-size: 11px;">REJECTED</span>`;
                 } else {
                     actionHtml = `
-                        <button class="btn payout-btn" onclick="markAsPaid('${p._id}')">✅ PAID</button>
-                        <button class="btn" style="background:var(--danger); color:white; margin-left:5px;" onclick="rejectPayout('${p._id}')">❌ REJECT</button>
+                        <button class="btn btn-pay" onclick="markAsPaid('${p._id}')">Pay User</button>
+                        <button class="btn btn-reject" onclick="rejectPayout('${p._id}')">Reject</button>
                     `;
                 }
 
                 payoutHtml += `<tr>
-                    <td>${new Date(p.date).toLocaleDateString()}</td>
-                    <td style="color:white;">${p.deviceId}</td>
-                    <td style="color: #00ff41; font-weight:bold;">₹${p.amount.toFixed(2)}</td>
-                    <td style="color: var(--warning);"><strong style="color:white;">${p.method}</strong><br>${p.details}</td>
+                    <td style="color: var(--text-muted); font-size: 12px;">${new Date(p.date).toLocaleDateString()}</td>
+                    <td style="color:white; font-weight: 600;">${p.deviceId}</td>
+                    <td class="code-text" style="color: var(--accent-red);">₹${p.amount.toFixed(2)}</td>
+                    <td>
+                        <strong style="color:var(--accent-blue); font-size: 11px; text-transform: uppercase;">${p.method}</strong><br>
+                        <span style="font-family: 'Space Mono', monospace; font-size: 12px; color: #ccc;">${p.details}</span>
+                    </td>
                     <td>${statusBadge || actionHtml}</td>
                 </tr>`;
             });
-            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center;'>No records found.</td></tr>";
-            
+            document.getElementById("payoutTable").innerHTML = payoutHtml || "<tr><td colspan='5' style='text-align:center; padding: 20px;'>No records found.</td></tr>";
             document.getElementById("pendingCount").innerText = pendingPayouts;
 
             // Render Solar Leads
@@ -336,23 +456,46 @@
             solarLeads.forEach(lead => {
                 if (lead.status !== "Paid") {
                     pendingSolarCount++;
-                    let statusBadge = lead.status === 'Pending' ? `<span style="color:var(--warning)">🟡 Pending</span>` : `<span style="color:var(--secondary)">🔵 Verified</span>`;
-                    solarHtml += `<tr><td>${new Date(lead.date).toLocaleDateString()}</td><td style="color:white; font-size:12px;">${lead.submittedBy}</td><td><strong style="color:white;">${lead.customerName}</strong><br><span style="color:var(--solar)">📞 ${lead.mobileNumber}</span></td><td>${lead.city} <br> <span style="color:#888; font-size:12px;">Bill: ${lead.bill}</span></td><td>${statusBadge}</td><td>${lead.status === 'Pending' ? `<button class="btn verify-btn" onclick="updateSolarStatus('${lead._id}', 'Verified')">Verify</button>` : ''}<button class="btn solar-pay-btn" onclick="updateSolarStatus('${lead._id}', 'Paid')">💰 PAY ₹1500</button></td></tr>`;
+                    let statusBadge = lead.status === 'Pending' ? `<span style="color:var(--accent-amber); font-weight: 600;">Pending</span>` : `<span style="color:var(--accent-blue); font-weight: 600;">Verified</span>`;
+                    
+                    let dealInfo = "";
+                    let payAmt = 1500;
+                    let btnClass = "btn-pay";
+
+                    if (lead.dealType === "Crack Deal") {
+                        payAmt = 5000;
+                        dealInfo = `<span class="deal-badge">CRACK DEAL</span><br>
+                                    <strong style="color:white; font-size: 12px;">${lead.closerName || 'N/A'}</strong><br>
+                                    <span style="color:var(--text-muted); font-size: 11px;">📱 <a href="https://wa.me/91${lead.closerPhone}" target="_blank" style="color:var(--accent-blue); text-decoration:none;">${lead.closerPhone || 'N/A'}</a></span>`;
+                    } else {
+                        dealInfo = `<span style="color:var(--text-muted); font-size: 12px;">Lead Only<br>Team handled</span>`;
+                    }
+
+                    solarHtml += `<tr>
+                        <td style="color: var(--text-muted); font-size: 12px;">${new Date(lead.date).toLocaleDateString()}</td>
+                        <td style="color:var(--text-muted); font-size:11px;">${lead.submittedBy}</td>
+                        <td><strong style="color:white;">${lead.customerName}</strong><br><span class="code-text" style="color:var(--text-muted); font-size: 11px;">${lead.mobileNumber}</span></td>
+                        <td>${lead.city} <br> <span style="color:var(--text-muted); font-size:11px;">Bill: ${lead.bill}</span></td>
+                        <td>${dealInfo}</td>
+                        <td>${statusBadge}</td>
+                        <td>
+                            ${lead.status === 'Pending' ? `<button class="btn btn-verify" onclick="updateSolarStatus('${lead._id}', 'Verified', ${payAmt})">Verify Site</button>` : ''}
+                            <button class="btn ${btnClass}" onclick="updateSolarStatus('${lead._id}', 'Paid', ${payAmt})">Pay ₹${payAmt}</button>
+                        </td>
+                    </tr>`;
                 }
             });
-            document.getElementById("solarTable").innerHTML = solarHtml || "<tr><td colspan='6' style='text-align:center;'>No pending solar leads right now.</td></tr>";
+            document.getElementById("solarTable").innerHTML = solarHtml || "<tr><td colspan='7' style='text-align:center; padding: 20px;'>No pending solar leads.</td></tr>";
             document.getElementById("solarCount").innerText = pendingSolarCount;
         }
 
         async function submitQuestion() {
-            // Fetch English values
             const q_en = document.getElementById("q_en").value.trim();
             const opt_en_a = document.getElementById("opt_en_a").value.trim();
             const opt_en_b = document.getElementById("opt_en_b").value.trim();
             const opt_en_c = document.getElementById("opt_en_c").value.trim();
             const opt_en_d = document.getElementById("opt_en_d").value.trim();
             
-            // Fetch Hindi values
             const q_hi = document.getElementById("q_hi").value.trim();
             const opt_hi_a = document.getElementById("opt_hi_a").value.trim();
             const opt_hi_b = document.getElementById("opt_hi_b").value.trim();
@@ -361,14 +504,12 @@
 
             const correct_ans = document.getElementById("correct_ans").value;
 
-            // Basic validation (at least English is required)
             if(!q_en || !opt_en_a || !opt_en_b || !opt_en_c || !opt_en_d) {
                 alert("⚠️ Please fill all English question fields!"); return;
             }
 
             const payload = {
-                question_en: q_en,
-                question_hi: q_hi, // Will be empty string if left blank
+                question_en: q_en, question_hi: q_hi, 
                 options_en: { "A": opt_en_a, "B": opt_en_b, "C": opt_en_c, "D": opt_en_d },
                 options_hi: { "A": opt_hi_a, "B": opt_hi_b, "C": opt_hi_c, "D": opt_hi_d },
                 correctAnswer: correct_ans
@@ -376,14 +517,11 @@
 
             try {
                 const response = await fetch(ADD_QUESTION_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                 });
                 
                 if(response.ok) {
-                    alert("✅ Question Saved to Vault! (It will never be repeated)");
-                    // Clear all fields
+                    alert("✅ Question Saved to Vault! (It will not repeat)");
                     const inputs = document.querySelectorAll('.q-form input');
                     inputs.forEach(input => input.value = '');
                 } else { alert("❌ Failed to save question."); }
@@ -391,33 +529,24 @@
         }
 
         async function markAsPaid(payoutId) {
-            if(!confirm("Are you sure?")) return;
+            if(!confirm("Approve this payout?")) return;
             await fetch(PAY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payoutId: payoutId }) });
             loadAllData();
         }
+
         async function rejectPayout(payoutId) {
-            if(!confirm("⚠️ REJECT PAYOUT?\n\nThis will cancel the payout and REFUND the money back to the user's wallet. Are you sure?")) return;
-            
+            if(!confirm("⚠️ REJECT PAYOUT?\n\nThis will cancel the transfer and refund the amount to the user's wallet. Proceed?")) return;
             try {
                 const response = await fetch("/admin/reject", { 
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' }, 
-                    body: JSON.stringify({ payoutId: payoutId }) 
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payoutId: payoutId }) 
                 });
-                
-                if (response.ok) {
-                    alert("✅ Payout Rejected & Money Refunded!");
-                    loadAllData();
-                } else {
-                    alert("❌ Failed to reject payout.");
-                }
-            } catch(e) {
-                alert("❌ Connection Error.");
-            }
+                if (response.ok) { alert("✅ Payout Rejected & Refunded"); loadAllData(); } 
+                else { alert("❌ Failed to reject payout."); }
+            } catch(e) { alert("❌ Connection Error."); }
         }
 
-        async function updateSolarStatus(leadId, newStatus) {
-            let msg = newStatus === 'Paid' ? "⚠️ WARNING: Auto-Pay ₹1500 to User?" : "Verify Site?";
+        async function updateSolarStatus(leadId, newStatus, amount = 1500) {
+            let msg = newStatus === 'Paid' ? `Approve payout of ₹${amount} to User?` : "Mark site as verified?";
             if(!confirm(msg)) return;
             await fetch(SOLAR_UPDATE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: leadId, newStatus: newStatus }) });
             loadAllData();
