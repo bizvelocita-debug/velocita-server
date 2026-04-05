@@ -63,19 +63,20 @@ redisClient.connect().catch(() => {
 });
 
 // 🛡️ CUSTOM HELPERS: Safe Redis Functions (Crash hone nahi denge)
+// 🛡️ CUSTOM HELPERS: Safe Redis Functions (Crash hone nahi denge)
 const safeRedisGet = async (key) => {
     if (!isRedisConnected) return null;
-    try { return await redisClient.get(key); } catch(e) { return null; }
+    try { return await redisClient.get(key); } catch(e) { return null; } // ✅ Yahan redisClient hona chahiye
 };
 
 const safeRedisSet = async (key, value, options) => {
     if (!isRedisConnected) return;
-    try { await redisClient.set(key, value, options); } catch(e) {}
+    try { await redisClient.set(key, value, options); } catch(e) {} // ✅ Yahan redisClient hona chahiye
 };
 
 const safeRedisDel = async (key) => {
     if (!isRedisConnected) return;
-    try { await redisClient.del(key); } catch(e) {}
+    try { await redisClient.del(key); } catch(e) {} // ✅ Yahan redisClient hona chahiye
 };
 
 // ==========================================
@@ -140,6 +141,9 @@ const solarLeadSchema = new mongoose.Schema({
     mobileNumber: { type: String, required: true, unique: true }, 
     city: { type: String, required: true },
     bill: { type: String, required: true },
+    dealType: { type: String, default: "Normal" }, 
+    closerName: { type: String, default: "" },     
+    closerPhone: { type: String, default: "" },    
     status: { type: String, default: "Pending" }, 
     date: { type: Date, default: Date.now }
 });
@@ -315,12 +319,12 @@ const verifyAppSignature = async (req, res, next) => {
     }
     
     // 🔥 REDIS NONCE CACHE (Memory Leak Fix)
-    const isNonceUsed = await redisClient.get(`nonce_${nonce}`);
+    const isNonceUsed = await safeRedisGet(`nonce_${nonce}`);
     if (isNonceUsed) {
         console.log(`🚨 REPLAY ATTACK BLOCKED from ${req.userEmail}`);
         return res.status(403).json({ error: "🛑 REQUEST ALREADY USED!" });
     }
-    await redisClient.set(`nonce_${nonce}`, "used", { EX: 60 });
+    await safeRedisSet(`nonce_${nonce}`, "used", { EX: 60 });
 
     // 3. HMAC SIGNATURE CHECK (Tamper Proofing)
     const payload = req.rawBody || ""; // 🎯 FIXED: Ab exact wahi data check hoga jo app ne bheja tha
@@ -357,7 +361,7 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
         const redisKey = `user_${deviceId}`;
 
         // ⚡ 1. TRY REDIS FIRST
-        const cachedUser = await redisClient.get(redisKey);
+        const cachedUser = await safeRedisGet(redisKey);
 
         if (cachedUser) {
             user = JSON.parse(cachedUser); 
@@ -416,7 +420,7 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
         if (needsDbUpdate) {
             user.lastActive = now;
             await User.updateOne({ deviceId }, { $set: user }); 
-            await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 }); 
+            await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 }); 
         }
 
         res.json({ 
@@ -536,7 +540,7 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         
         // 🔥 NAYA: UPDATE REDIS CACHE SO NEXT PING GETS NEW BALANCE
         const redisKey = `user_${deviceId}`;
-        await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 }); 
+        await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 }); 
 
         res.json({ success: true, addedAmount: finalAmount, newBalance: user.balance, dailyMeter: user.dailyTaskMeter, isUnlocked: user.goldenPassUnlocked });
     } catch (e) { 
@@ -606,7 +610,7 @@ app.get('/postback', async (req, res) => {
         
         // 🔥 NAYA: Redis update karo offerwall earnings ke liye
         const redisKey = `user_${deviceId}`;
-        await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 });
+        await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 });
 
         console.log(`✅ POSTBACK SUCCESS: ₹${amount} added to ${deviceId}`);
         
@@ -650,7 +654,7 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
             
             // 🔥 NAYA: Redis update karo taaki turant 50 Rs dikhein
             const redisKey = `user_${deviceId}`;
-            await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 });
+            await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 });
 
             return res.json({ success: true, message: "Winner! ₹50 Added." });
         }
@@ -688,19 +692,28 @@ app.post('/withdraw', verifyAppSignature, async (req, res) => {
 
         // 🔥 NAYA: Redis ko batao ki paise kat gaye hain
         const redisKey = `user_${deviceId}`;
-        await redisClient.set(redisKey, JSON.stringify(user), { EX: 3600 });
+        await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 });
 
         res.json({ status: "success", message: "Request Sent to Admin!" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/submit-solar-lead', verifyAppSignature, async (req, res) => {
-    const deviceId = req.userEmail; // 🛡️ Firebase Token Email
-    const { customerName, mobileNumber, city, bill } = req.body;
+    const deviceId = req.userEmail; 
+    const { customerName, mobileNumber, city, bill, dealType, closerName, closerPhone } = req.body;
     try {
         const existingLead = await SolarLead.findOne({ mobileNumber });
         if (existingLead) return res.status(400).json({ error: "Duplicate number!" });
 
-        const newLead = new SolarLead({ submittedBy: deviceId, customerName, mobileNumber, city, bill });
+        const newLead = new SolarLead({ 
+            submittedBy: deviceId, 
+            customerName, 
+            mobileNumber, 
+            city, 
+            bill,
+            dealType: dealType || "Normal",
+            closerName: closerName || "",
+            closerPhone: closerPhone || ""
+        });
         await newLead.save();
 
         res.json({ success: true, message: "Lead submitted successfully!" });
@@ -752,14 +765,14 @@ app.post('/bindReferral', verifyAppSignature, async (req, res) => {
         referrer.balance += 10.00; 
         referrer.totalInvites += 1; 
         await referrer.save();
-        await redisClient.set(`user_${referrer.deviceId}`, JSON.stringify(referrer), { EX: 3600 }); // 🔥 NAYA
+        await safeRedisSet(`user_${referrer.deviceId}`, JSON.stringify(referrer), { EX: 3600 }); // 🔥 NAYA
 
         // 4. Naye User ki profile update karo
         user.referredBy = referrer.deviceId; 
         user.hardwareId = hardwareId; 
         user.hasClaimedReferral = true; 
         await user.save();
-        await redisClient.set(`user_${deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
+        await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
 
         // 🛡️ 5. PHONE KO HAMESHA KE LIYE BLACKLIST KAR DO
         if (hardwareId && hardwareId !== "unknown_device") {
@@ -782,7 +795,7 @@ app.post('/deleteUser', verifyAppSignature, async (req, res) => {
         if (!deletedUser) {
             return res.status(404).json({ error: "User not found" });
         }
-        await redisClient.del(`user_${deviceId}`); // 🔥 NAYA: Redis se bhi uda do
+        await safeRedisDel(`user_${deviceId}`); // 🔥 NAYA: Redis se bhi uda do
         
         
         // Agar uska koi pending payout hai, usko bhi delete kar sakte ho (Optional but good practice)
@@ -845,7 +858,7 @@ app.post('/admin/reject', adminAuth, async (req, res) => {
         if (user) {
             user.balance += payout.amount;
             await user.save();
-            await redisClient.set(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
+            await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
         }
 
         // Payout ko cancel kar do
@@ -880,9 +893,12 @@ app.post('/admin/update-solar-lead', adminAuth, async (req, res) => {
         if (newStatus === "Paid") {
             const user = await User.findOne({ deviceId: lead.submittedBy });
             if (user) { 
-                user.balance += 1500.00; 
+                // 🔥 SMART CHECK: Payout decide karo deal type ke hisaab se
+                const payoutAmount = lead.dealType === "Crack Deal" ? 5000.00 : 1500.00;
+                
+                user.balance += payoutAmount; 
                 await user.save(); 
-                await redisClient.set(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
+                await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); 
             }
         }
         res.json({ success: true });
