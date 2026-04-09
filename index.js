@@ -156,6 +156,16 @@ const solarLeadSchema = new mongoose.Schema({
     date: { type: Date, default: Date.now }
 });
 const SolarLead = mongoose.model('SolarLead', solarLeadSchema);
+// 🧘‍♂️ YOGA LEAD MODEL
+const yogaLeadSchema = new mongoose.Schema({
+    submittedBy: { type: String, required: true }, 
+    studentName: { type: String, required: true },
+    studentPhone: { type: String, required: true }, 
+    utrNumber: { type: String, required: true, unique: true }, 
+    status: { type: String, default: "Pending" }, 
+    date: { type: Date, default: Date.now }
+});
+const YogaLead = mongoose.model('YogaLead', yogaLeadSchema);
 
 // ❓ LIVE ARENA QUESTIONS MODEL
 const liveQuestionSchema = new mongoose.Schema({
@@ -931,6 +941,21 @@ app.post('/submit-solar-lead', verifyAppSignature, async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
+// 🧘‍♂️ SUBMIT YOGA ADMISSION
+app.post('/submit-yoga-lead', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; 
+    const { studentName, studentPhone, utrNumber } = req.body;
+    try {
+        const existingLead = await YogaLead.findOne({ utrNumber });
+        if (existingLead) return res.status(400).json({ error: "Duplicate UTR!" });
+
+        const newLead = new YogaLead({ submittedBy: deviceId, studentName, studentPhone, utrNumber });
+        await newLead.save();
+
+        res.json({ success: true, message: "Yoga Admission submitted!" });
+    } catch (e) { res.status(500).json({ error: "Server Error" }); }
+});
+
 // GET se POST kiya, aur req.query se req.body kiya!
 app.post('/my-solar-leads', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail; // 🛡️ Firebase Token Email 
@@ -1108,6 +1133,32 @@ app.post('/admin/update-solar-lead', adminAuth, async (req, res) => {
                 const payoutAmount = lead.dealType === "Crack Deal" ? 5000.00 : 1500.00;
                 
                 user.balance += payoutAmount; 
+                await user.save(); 
+                await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); 
+            }
+        }
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: "Error" }); }
+});
+
+// 🧘‍♂️ ADMIN YOGA ROUTES
+app.get('/admin/yoga-leads', adminAuth, async (req, res) => {
+    try { const leads = await YogaLead.find().sort({ date: -1 }); res.json(leads); } catch (e) { res.status(500).json({ error: "Error" }); }
+});
+
+app.post('/admin/update-yoga-lead', adminAuth, async (req, res) => {
+    const { leadId, newStatus } = req.body;
+    try {
+        const lead = await YogaLead.findById(leadId);
+        if (!lead) return res.status(404).json({ error: "Lead not found" });
+        if (lead.status === "Paid") return res.status(400).json({ error: "Already Paid." });
+
+        lead.status = newStatus; await lead.save();
+
+        if (newStatus === "Paid") {
+            const user = await User.findOne({ deviceId: lead.submittedBy });
+            if (user) { 
+                user.balance += 300.00; // 👈 USER KO YAHAN SE ₹300 MILENGE
                 await user.save(); 
                 await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); 
             }
