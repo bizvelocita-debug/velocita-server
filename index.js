@@ -395,11 +395,11 @@ app.post('/premium-deals', verifyAppSignature, async (req, res) => {
         const vcommKey = process.env.VCOMM_API_KEY || "69d4ac2c5e5c12a3e88d2662c8469d4ac2c5e604";
         const vCommUrl = `https://api.vcommission.com/v2/publisher/campaigns?apikey=${vcommKey}`;
         const response = await axios.get(vCommUrl);
-        
-        // API response se array nikalna (vCommission ka structure)
-        const campaigns = response.data.campaigns || response.data.data || response.data || []; 
 
-        const processedDeals = [];
+        // API response se array nikalna (vCommission ka structure)
+        const campaigns = response.data?.data?.campaigns || response.data?.campaigns || []; 
+
+        const processedDeals = [];
 
         // 🧹 3. THE SMART FILTER ENGINE
         for (const camp of campaigns) {
@@ -503,9 +503,9 @@ app.post('/regular-deals', verifyAppSignature, async (req, res) => {
         const vcommKey = process.env.VCOMM_API_KEY || "69d4ac2c5e5c12a3e88d2662c8469d4ac2c5e604";
         const vCommUrl = `https://api.vcommission.com/v2/publisher/campaigns?apikey=${vcommKey}`;
         const response = await axios.get(vCommUrl);
-        
-        const campaigns = response.data.campaigns || response.data.data || response.data || []; 
-        const processedDeals = [];
+       
+        const campaigns = response.data?.data?.campaigns || response.data?.campaigns || []; 
+        const processedDeals = [];
 
         // 🧹 2. FILTER ENGINE FOR REGULAR TASKS
         for (const camp of campaigns) {
