@@ -4,7 +4,8 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const path = require('path');
 const crypto = require('crypto');
-const fs = require('fs'); 
+const fs = require('fs');
+const axios = require('axios'); 
 const cron = require('node-cron'); 
 // 🔥 NEW: Firebase Admin SDK for Realtime WebSockets
 const admin = require('firebase-admin');
@@ -77,6 +78,13 @@ const safeRedisSet = async (key, value, options) => {
 const safeRedisDel = async (key) => {
     if (!isRedisConnected) return;
     try { await redisClient.del(key); } catch(e) {} // ✅ Yahan redisClient hona chahiye
+};
+
+// ==========================================
+// 🕒 IST TIMEZONE HELPER
+// ==========================================
+const getISTDateString = () => {
+    return new Date().toLocaleString("sv-SE", { timeZone: "Asia/Kolkata" }).substring(0, 10);
 };
 
 // ==========================================
@@ -167,6 +175,15 @@ const usedDeviceSchema = new mongoose.Schema({
     hardwareId: { type: String, unique: true }
 });
 const UsedDevice = mongoose.model('UsedDevice', usedDeviceSchema);
+
+// 🛡️ ANTI-HACK: Offerwall Transaction Log
+const offerwallTxSchema = new mongoose.Schema({
+    txId: { type: String, required: true, unique: true },
+    deviceId: String,
+    amount: Number,
+    date: { type: Date, default: Date.now }
+});
+const OfferwallTx = mongoose.model('OfferwallTx', offerwallTxSchema);
 
 
 // ==========================================
@@ -350,6 +367,187 @@ const verifyAppSignature = async (req, res, next) => {
 
 app.get('/', (req, res) => { res.send("VELOCITA INDIAN SERVER IS ONLINE 🇮🇳"); });
 
+// ==========================================
+// 💎 PREMIUM DEALS ENGINE (vCommission Pull API)
+// ==========================================
+
+// 🧠 Smart Category Mapper Helper
+const mapCategory = (title, category) => {
+    const text = (title + " " + category).toLowerCase();
+    if (text.includes("demat") || text.includes("trading") || text.includes("stock") || text.includes("upstox") || text.includes("angel")) return "Demat Accounts";
+    if (text.includes("credit card") || text.includes("sbi card") || text.includes("hdfc card")) return "Credit Cards";
+    if (text.includes("bank") || text.includes("saving") || text.includes("account") || text.includes("kotak")) return "Bank Accounts";
+    return "Finance";
+};
+
+// 🚀 Route 1: App ko filtered deals bhejna
+app.post('/premium-deals', verifyAppSignature, async (req, res) => {
+    try {
+        // ⚡ 1. CHECK CACHE FIRST (Redis se fast reply)
+        const cachedDeals = await safeRedisGet('premium_deals_cache');
+        if (cachedDeals) {
+            return res.json(JSON.parse(cachedDeals));
+        }
+
+        console.log("Fetching fresh campaigns from vCommission...");
+
+        // 🌐 2. FETCH FROM VCOMMISSION API (Tumhari API Key se)
+        const vcommKey = process.env.VCOMM_API_KEY || "69d4ac2c5e5c12a3e88d2662c8469d4ac2c5e604";
+        const vCommUrl = `https://api.vcommission.com/v2/publisher/campaigns?apikey=${vcommKey}`;
+        const response = await axios.get(vCommUrl);
+        
+        // API response se array nikalna (vCommission ka structure)
+        const campaigns = response.data.campaigns || response.data.data || response.data || []; 
+
+        const processedDeals = [];
+
+        // 🧹 3. THE SMART FILTER ENGINE
+        for (const camp of campaigns) {
+            const title = camp.title || camp.campaign_name || camp.name || "";
+            const status = (camp.status || "").toLowerCase();
+            const countries = camp.countries || camp.geo || "";
+            
+            // RULE 1: Must be Active
+            if (status !== 'active' && status !== 'approved') continue;
+            
+            // RULE 2: Must be India (IN)
+            if (!countries.includes('IN') && !countries.includes('India')) continue;
+
+            // Extract Payout safely
+            let rawPayout = camp.payout_revenue || camp.payout || camp.default_payout || "0";
+            let basePayout = parseFloat(rawPayout.toString().replace(/[^0-9.]/g, '')); 
+
+            // RULE 3: 30/70 SPLIT & MINIMUM ₹300 PROFIT CHECK
+            // Agar Base Payout 429+ hoga, tabhi 70% share 300+ banega.
+            if (basePayout >= 429) {
+                processedDeals.push({
+                    id: camp.campaign_id || camp.id,
+                    brand: camp.advertiser_name || title.split(' ')[0] || "Premium Brand",
+                    title: title,
+                    category: mapCategory(title, camp.category || ""),
+                    desc: camp.description || `Complete the account opening process for ${title} to unlock your high-ticket reward.`,
+                    basePayout: basePayout,
+                    timeToTrack: "24 - 48 Hrs", 
+                    tracking_url: camp.tracking_url || "" 
+                });
+            }
+        }
+
+        // 💾 4. SAVE TO REDIS (Cache for 30 minutes to make app super fast)
+        await safeRedisSet('premium_deals_cache', JSON.stringify(processedDeals), { EX: 1800 });
+        
+        res.json(processedDeals);
+
+    } catch (error) {
+        console.error("❌ Premium Deals Fetch Error:", error.message);
+        const oldData = await safeRedisGet('premium_deals_cache');
+        if (oldData) return res.json(JSON.parse(oldData));
+        res.status(500).json({error: "Failed to fetch deals"});
+    }
+});
+
+// 🚀 Route 2: Secure Redirector (Browser me link kholne ke liye)
+app.get('/redirect', async (req, res) => {
+    const { camp, uid } = req.query; // camp = Campaign ID, uid = User Email
+    
+    if (!camp || !uid) {
+        return res.status(400).send("Invalid Tracking Link. Missing Parameters.");
+    }
+
+    try {
+        let targetUrl = "";
+        
+        // Redis cache se original link nikalenge
+        const cachedDeals = await safeRedisGet('premium_deals_cache');
+        if (cachedDeals) {
+            const deals = JSON.parse(cachedDeals);
+            const deal = deals.find(d => d.id == camp);
+            if (deal && deal.tracking_url) {
+                targetUrl = deal.tracking_url;
+            }
+        }
+
+        // Fallback generic link
+        if (!targetUrl) {
+             const baseUrl = process.env.VCOMM_DEFAULT_TRACKING_URL || "https://tracking.vcommission.com/click";
+             targetUrl = `${baseUrl}?campaign_id=${camp}`; 
+        }
+
+        // SECURE APPEND: Add user's email in the `p1` parameter
+        const finalUrl = targetUrl.includes('?') 
+            ? `${targetUrl}&p1=${uid}` 
+            : `${targetUrl}?p1=${uid}`;
+
+        console.log(`🔗 Redirecting User ${uid} to Campaign ${camp}`);
+        res.redirect(finalUrl);
+
+    } catch (e) {
+        console.error("❌ Redirect Error:", e);
+        res.status(500).send("Redirection Error. Please try again.");
+    }
+});
+
+// ==========================================
+// 💸 REGULAR DEALS ENGINE (50/50 Split, Min ₹10 Profit)
+// ==========================================
+app.post('/regular-deals', verifyAppSignature, async (req, res) => {
+    try {
+        // ⚡ 1. CHECK CACHE FIRST 
+        const cachedDeals = await safeRedisGet('regular_deals_cache');
+        if (cachedDeals) {
+            return res.json(JSON.parse(cachedDeals));
+        }
+
+        console.log("Fetching fresh REGULAR campaigns from vCommission...");
+
+        const vcommKey = process.env.VCOMM_API_KEY || "69d4ac2c5e5c12a3e88d2662c8469d4ac2c5e604";
+        const vCommUrl = `https://api.vcommission.com/v2/publisher/campaigns?apikey=${vcommKey}`;
+        const response = await axios.get(vCommUrl);
+        
+        const campaigns = response.data.campaigns || response.data.data || response.data || []; 
+        const processedDeals = [];
+
+        // 🧹 2. FILTER ENGINE FOR REGULAR TASKS
+        for (const camp of campaigns) {
+            const title = camp.title || camp.campaign_name || camp.name || "";
+            const status = (camp.status || "").toLowerCase();
+            const countries = camp.countries || camp.geo || "";
+            
+            // Must be Active & India (IN)
+            if (status !== 'active' && status !== 'approved') continue;
+            if (!countries.includes('IN') && !countries.includes('India')) continue;
+
+            let rawPayout = camp.payout_revenue || camp.payout || camp.default_payout || "0";
+            let basePayout = parseFloat(rawPayout.toString().replace(/[^0-9.]/g, '')); 
+
+            // 🛑 RULE: Minimum Base Payout ₹20 (50% is ₹10) AND Maximum ₹500 (50% is ₹250)
+            if (basePayout >= 20 && basePayout <= 500) {
+                processedDeals.push({
+                    id: camp.campaign_id || camp.id,
+                    brand: camp.advertiser_name || title.split(' ')[0] || "Quick Task",
+                    title: title,
+                    category: "Tasks", // Regular task category
+                    desc: camp.description || `Complete this task properly to earn your reward.`,
+                    basePayout: basePayout,
+                    timeToTrack: "24 Hrs", 
+                    tracking_url: camp.tracking_url || "" 
+                });
+            }
+        }
+
+        // 💾 3. SAVE TO REDIS (Cache for 30 mins)
+        await safeRedisSet('regular_deals_cache', JSON.stringify(processedDeals), { EX: 1800 });
+        
+        res.json(processedDeals);
+
+    } catch (error) {
+        console.error("❌ Regular Deals Fetch Error:", error.message);
+        const oldData = await safeRedisGet('regular_deals_cache');
+        if (oldData) return res.json(JSON.parse(oldData));
+        res.status(500).json({error: "Failed to fetch regular deals"});
+    }
+});
+
 // A. PING (Now Secured & Redis Cached! ⚡)
 app.post('/ping', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail; 
@@ -378,7 +576,7 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
         }
 
         const now = new Date();
-        const today = now.toISOString().substring(0, 10); 
+        const today = getISTDateString(); 
         let needsDbUpdate = false; 
 
         // 🔥 Daily Reset Logic
@@ -445,7 +643,7 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         if (!user) return res.status(404).json({ error: "User not found" });
 
         const now = new Date();
-        const today = now.toISOString().substring(0, 10); 
+        const today = getISTDateString();
 
         // 🔥 Daily Reset Logic (Fail-safe for Midnight)
         if (user.lastTaskDate !== today) { 
@@ -571,15 +769,25 @@ app.get('/postback', async (req, res) => {
         return res.status(403).send("0");
     }
 
-    const deviceId = req.query.ext_user_id || req.query.userid || req.query.subId; 
-    const amount = parseFloat(req.query.amount || req.query.reward);
+    const deviceId = req.query.ext_user_id || req.query.userid || req.query.subId; 
+    const amount = parseFloat(req.query.amount || req.query.reward);
+    
+    // 🛡️ NAYA: Extract Transaction ID
+    const txId = req.query.tx_id || req.query.transaction_id || req.query.id || req.query.click_id;
 
-    if (!deviceId || isNaN(amount)) {
+    if (!deviceId || isNaN(amount) || !txId) {
         console.error("❌ Postback Failed: Missing Parameters", req.query);
-        return res.status(400).send("0"); // Network ko '0' bhejna hota hai fail hone par
+        return res.status(400).send("0"); 
     }
 
     try {
+        // 🛡️ NAYA: Check Replay Attack (Kya ye TxID pehle process ho chuki hai?)
+        const existingTx = await OfferwallTx.findOne({ txId });
+        if (existingTx) {
+            console.log(`⚠️ REPLAY ATTACK AVERTED: TxID ${txId} already processed.`);
+            return res.status(200).send("1"); // Network ko '1' bhejte hain taaki wo retry na kare
+        }
+
         const user = await User.findOne({ deviceId });
         if (!user) {
             console.error("❌ Postback Failed: User Not Found", deviceId);
@@ -589,7 +797,7 @@ app.get('/postback', async (req, res) => {
         // Add money to user's wallet
         user.balance += amount;
 
-        // 💸 10% EARLY BIRD COMMISSION (For Offerwalls)
+        // 💸 10% EARLY BIRD COMMISSION
         if (user.referredBy && !user.hasWithdrawnEver) {
             const upline = await User.findOne({ deviceId: user.referredBy });
             if (upline) {
@@ -608,13 +816,16 @@ app.get('/postback', async (req, res) => {
 
         await user.save();
         
+        // 🛡️ NAYA: TRANSACTION LOG MEIN SAVE KARO TAAKI DUBARA NA AAYE
+        await new OfferwallTx({ txId, deviceId, amount }).save();
+        
         // 🔥 NAYA: Redis update karo offerwall earnings ke liye
         const redisKey = `user_${deviceId}`;
         await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 });
 
         console.log(`✅ POSTBACK SUCCESS: ₹${amount} added to ${deviceId}`);
         
-        res.status(200).send("1"); // Network ko '1' (Success) bhejna zaroori hai
+        res.status(200).send("1"); 
     } catch (e) {
         console.error("❌ Postback Server Error:", e);
         res.status(500).send("0");
@@ -646,7 +857,7 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
             return res.json({ success: false, message: "Eliminated" });
         }
 
-        const today = new Date().toISOString().substring(0, 10);
+        const today = getISTDateString();
         if (user.lastArenaWinDate !== today) {
             user.balance += 50.00; 
             user.lastArenaWinDate = today;
