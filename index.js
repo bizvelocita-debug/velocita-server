@@ -390,52 +390,52 @@ const mapCategory = (title, category) => {
     return "Finance";
 };
 
-// 🚀 Route 1: App ko filtered deals bhejna
+// 🚀 Route 1: App ko filtered premium deals bhejna
 app.post('/premium-deals', verifyAppSignature, async (req, res) => {
     try {
-        // ⚡ 1. CHECK CACHE FIRST (Redis se fast reply)
-        const cachedDeals = await safeRedisGet('premium_deals_cache');
-        if (cachedDeals) {
+        // ⚡ 1. CHECK CACHE FIRST (Cache key name changed to bust old cache)
+        const cachedDeals = await safeRedisGet('premium_deals_cache_v3');
+        if (cachedDeals && JSON.parse(cachedDeals).length > 0) {
             return res.json(JSON.parse(cachedDeals));
         }
 
         console.log("Fetching fresh campaigns from vCommission...");
 
-        // 🌐 2. FETCH FROM VCOMMISSION API (Tumhari API Key se)
+        // 🌐 2. FETCH FROM VCOMMISSION API
         const vcommKey = process.env.VCOMM_API_KEY || "69d4ac2c5e5c12a3e88d2662c8469d4ac2c5e604";
         const vCommUrl = `https://api.vcommission.com/v2/publisher/campaigns?apikey=${vcommKey}`;
         const response = await axios.get(vCommUrl);
 
-        // API response se array nikalna (vCommission ka structure)
-        const campaigns = response.data?.data?.campaigns || response.data?.campaigns || []; 
-
-        const processedDeals = [];
+        const campaigns = response.data?.data?.campaigns || response.data?.campaigns || []; 
+        const processedDeals = [];
 
         // 🧹 3. THE SMART FILTER ENGINE
         for (const camp of campaigns) {
             const title = camp.title || camp.campaign_name || camp.name || "";
             const status = (camp.status || "").toLowerCase();
-            const countries = camp.countries || camp.geo || "";
+            const countries = (camp.countries || camp.geo || "").toString().toUpperCase();
             
-            // RULE 1: Must be Active
             if (status !== 'active' && status !== 'approved') continue;
-            
-            // RULE 2: Must be India (IN)
-            if (!countries.includes('IN') && !countries.includes('India')) continue;
+            if (!countries.includes('IN') && !countries.includes('INDIA')) continue;
 
-            // Extract Payout safely
+            // --- SMART PAYOUT PARSER START ---
             let rawPayout = camp.payout_revenue || camp.payout || camp.default_payout || "0";
-            let basePayout = parseFloat(rawPayout.toString().replace(/[^0-9.]/g, '')); 
+            let payoutString = rawPayout.toString().toUpperCase();
+            let basePayout = parseFloat(payoutString.replace(/[^0-9.]/g, '')) || 0; 
+            
+            if (payoutString.includes('$') || payoutString.includes('USD') || (camp.currency && camp.currency.toUpperCase() === 'USD')) {
+                basePayout = basePayout * 83; // USD to INR conversion
+            }
+            // --- SMART PAYOUT PARSER END ---
 
-            // RULE 3: 30/70 SPLIT & MINIMUM ₹300 PROFIT CHECK
-            // Agar Base Payout 429+ hoga, tabhi 70% share 300+ banega.
+            // 🛑 RULE 3: MINIMUM ₹429 CHECK
             if (basePayout >= 429) {
                 processedDeals.push({
                     id: camp.campaign_id || camp.id,
                     brand: camp.advertiser_name || title.split(' ')[0] || "Premium Brand",
                     title: title,
                     category: mapCategory(title, camp.category || ""),
-                    desc: camp.description || `Complete the account opening process for ${title} to unlock your high-ticket reward.`,
+                    desc: "Complete the account opening process to unlock your high-ticket reward.", // Clean static desc
                     basePayout: basePayout,
                     timeToTrack: "24 - 48 Hrs", 
                     tracking_url: camp.tracking_url || "" 
@@ -443,14 +443,18 @@ app.post('/premium-deals', verifyAppSignature, async (req, res) => {
             }
         }
 
-        // 💾 4. SAVE TO REDIS (Cache for 30 minutes to make app super fast)
-        await safeRedisSet('premium_deals_cache', JSON.stringify(processedDeals), { EX: 1800 });
+        console.log(`🎯 Premium Deals: ${processedDeals.length} valid Indian campaigns found.`);
+
+        // 💾 4. SAVE TO REDIS (Cache for 30 mins)
+        if (processedDeals.length > 0) {
+            await safeRedisSet('premium_deals_cache_v3', JSON.stringify(processedDeals), { EX: 1800 });
+        }
         
         res.json(processedDeals);
 
     } catch (error) {
         console.error("❌ Premium Deals Fetch Error:", error.message);
-        const oldData = await safeRedisGet('premium_deals_cache');
+        const oldData = await safeRedisGet('premium_deals_cache_v3');
         if (oldData) return res.json(JSON.parse(oldData));
         res.status(500).json({error: "Failed to fetch deals"});
     }
@@ -483,10 +487,10 @@ app.get('/redirect', async (req, res) => {
              targetUrl = `${baseUrl}?campaign_id=${camp}`; 
         }
 
-        // SECURE APPEND: Add user's email in the `p1` parameter
-        const finalUrl = targetUrl.includes('?') 
-            ? `${targetUrl}&p1=${uid}` 
-            : `${targetUrl}?p1=${uid}`;
+        // SECURE APPEND: Add user's email in the `p2` parameter (Trackier uses p1 for click_id)
+const finalUrl = targetUrl.includes('?') 
+    ? `${targetUrl}&p2=${uid}` 
+    : `${targetUrl}?p2=${uid}`;
 
         console.log(`🔗 Redirecting User ${uid} to Campaign ${camp}`);
         res.redirect(finalUrl);
@@ -503,8 +507,8 @@ app.get('/redirect', async (req, res) => {
 app.post('/regular-deals', verifyAppSignature, async (req, res) => {
     try {
         // ⚡ 1. CHECK CACHE FIRST 
-        const cachedDeals = await safeRedisGet('regular_deals_cache');
-        if (cachedDeals) {
+        const cachedDeals = await safeRedisGet('regular_deals_cache_v3');
+        if (cachedDeals && JSON.parse(cachedDeals).length > 0) {
             return res.json(JSON.parse(cachedDeals));
         }
 
@@ -513,31 +517,37 @@ app.post('/regular-deals', verifyAppSignature, async (req, res) => {
         const vcommKey = process.env.VCOMM_API_KEY || "69d4ac2c5e5c12a3e88d2662c8469d4ac2c5e604";
         const vCommUrl = `https://api.vcommission.com/v2/publisher/campaigns?apikey=${vcommKey}`;
         const response = await axios.get(vCommUrl);
-       
-        const campaigns = response.data?.data?.campaigns || response.data?.campaigns || []; 
-        const processedDeals = [];
+       
+        const campaigns = response.data?.data?.campaigns || response.data?.campaigns || []; 
+        const processedDeals = [];
 
         // 🧹 2. FILTER ENGINE FOR REGULAR TASKS
         for (const camp of campaigns) {
             const title = camp.title || camp.campaign_name || camp.name || "";
             const status = (camp.status || "").toLowerCase();
-            const countries = camp.countries || camp.geo || "";
+            const countries = (camp.countries || camp.geo || "").toString().toUpperCase();
             
-            // Must be Active & India (IN)
             if (status !== 'active' && status !== 'approved') continue;
-            if (!countries.includes('IN') && !countries.includes('India')) continue;
+            if (!countries.includes('IN') && !countries.includes('INDIA')) continue;
 
+            // --- SMART PAYOUT PARSER START ---
             let rawPayout = camp.payout_revenue || camp.payout || camp.default_payout || "0";
-            let basePayout = parseFloat(rawPayout.toString().replace(/[^0-9.]/g, '')); 
+            let payoutString = rawPayout.toString().toUpperCase();
+            let basePayout = parseFloat(payoutString.replace(/[^0-9.]/g, '')) || 0; 
+            
+            if (payoutString.includes('$') || payoutString.includes('USD') || (camp.currency && camp.currency.toUpperCase() === 'USD')) {
+                basePayout = basePayout * 83; // USD to INR conversion
+            }
+            // --- SMART PAYOUT PARSER END ---
 
-            // 🛑 RULE: Minimum Base Payout ₹20 (50% is ₹10) AND Maximum ₹500 (50% is ₹250)
+            // 🛑 RULE: Minimum Base Payout ₹20 (50% is ₹10) AND Maximum ₹500
             if (basePayout >= 20 && basePayout <= 500) {
                 processedDeals.push({
                     id: camp.campaign_id || camp.id,
                     brand: camp.advertiser_name || title.split(' ')[0] || "Quick Task",
                     title: title,
-                    category: "Tasks", // Regular task category
-                    desc: camp.description || `Complete this task properly to earn your reward.`,
+                    category: "Tasks", 
+                    desc: "Complete this task properly to earn your reward.", 
                     basePayout: basePayout,
                     timeToTrack: "24 Hrs", 
                     tracking_url: camp.tracking_url || "" 
@@ -545,14 +555,18 @@ app.post('/regular-deals', verifyAppSignature, async (req, res) => {
             }
         }
 
-        // 💾 3. SAVE TO REDIS (Cache for 30 mins)
-        await safeRedisSet('regular_deals_cache', JSON.stringify(processedDeals), { EX: 1800 });
+        console.log(`🎯 Regular Deals: ${processedDeals.length} valid Indian campaigns found.`);
+
+        // 💾 3. SAVE TO REDIS
+        if (processedDeals.length > 0) {
+            await safeRedisSet('regular_deals_cache_v3', JSON.stringify(processedDeals), { EX: 1800 });
+        }
         
         res.json(processedDeals);
 
     } catch (error) {
         console.error("❌ Regular Deals Fetch Error:", error.message);
-        const oldData = await safeRedisGet('regular_deals_cache');
+        const oldData = await safeRedisGet('regular_deals_cache_v3');
         if (oldData) return res.json(JSON.parse(oldData));
         res.status(500).json({error: "Failed to fetch regular deals"});
     }
