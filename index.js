@@ -1184,5 +1184,67 @@ app.post('/admin/add-question', adminAuth, async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
+// ==========================================
+// 📊 UNIFIED LEADS LEDGER (BankSathi Model)
+// ==========================================
+app.post('/my-unified-ledger', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; 
+    try {
+        // Teeno collections se user ka data fetch karo
+        const solarLeads = await SolarLead.find({ submittedBy: deviceId }).lean();
+        const yogaLeads = await YogaLead.find({ submittedBy: deviceId }).lean();
+        const dealLeads = await OfferwallTx.find({ deviceId }).lean(); // vCommission Postbacks
+
+        let unifiedList = [];
+
+        // ☀️ Solar Formatting
+        solarLeads.forEach(lead => {
+            unifiedList.push({
+                id: lead._id.toString(),
+                type: 'Solar',
+                title: lead.customerName || 'Solar Client',
+                subtitle: lead.dealType || 'Simple Lead',
+                status: lead.status || 'Pending',
+                amount: lead.dealType === 'Crack Deal' ? '5000' : '1500',
+                date: lead.date
+            });
+        });
+
+        // 🧘‍♂️ Yoga Formatting
+        yogaLeads.forEach(lead => {
+            unifiedList.push({
+                id: lead._id.toString(),
+                type: 'Yoga',
+                title: lead.studentName || 'Yoga Student',
+                subtitle: `UTR: ${lead.utrNumber}`,
+                status: lead.status || 'Pending',
+                amount: '300',
+                date: lead.date
+            });
+        });
+
+        // 💼 vCommission Deals Formatting
+        dealLeads.forEach(tx => {
+            unifiedList.push({
+                id: tx._id.toString(),
+                type: 'Deal',
+                title: 'Brand Partner Deal',
+                subtitle: `TxID: ${tx.txId}`,
+                status: 'Verified', // Postbacks hamesha successful deals ke hi aate hain
+                amount: tx.amount.toString(),
+                date: tx.date
+            });
+        });
+
+        // ⏳ Sort combined list by Date (Newest first)
+        unifiedList.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        res.json(unifiedList);
+    } catch (e) {
+        console.error("Unified Ledger Error:", e);
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log(`🚀 Indian Server running on Port ${PORT}`); });
