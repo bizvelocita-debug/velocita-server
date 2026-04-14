@@ -716,9 +716,8 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         } else if (TASK_REWARDS[taskId]) {
             // Static Tasks (Math, Quiz, etc)
             finalAmount = TASK_REWARDS[taskId]; 
-        } else if (taskId.startsWith("Flash Task") || taskId === 'unknown') {
-            // 🔥 FIX: Accept dynamic amount from App for verified Flash tasks
-            // Hacker isko misuse na kare isliye check lagaya: Max dynamic limit ₹50 ek baar mein
+        } else if (taskId.startsWith("Flash Task") || taskId === 'unknown' || taskId === 'weekly_bonus') {
+            // 🔥 NAYA: 'weekly_bonus' ko allow kiya
             const reqAmount = parseFloat(dynamicAmount) || 0;
             if (reqAmount > 0 && reqAmount <= 50) {
                 finalAmount = reqAmount;
@@ -729,20 +728,23 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
             return res.status(400).json({ error: "Invalid Task ID" });
         }
 
+        // 🛑 HELPER: Check if it's a bonus task (Bonus tasks meters mein add nahi hote)
+        const isBonusTask = (taskId === 'daily_bonus' || taskId === 'weekly_bonus');
+
         // 🛑 MAX DAILY LIMIT CHECK (Taaki app bankrupt na ho)
-        if (user.dailyTaskEarnings + finalAmount > 50.0 && taskId !== 'daily_bonus') {
+        if (user.dailyTaskEarnings + finalAmount > 50.0 && !isBonusTask) {
             return res.status(429).json({ error: "Daily limit reached. Use Premium Offers for unlimited earning!" });
         }
 
         // 🧮 BALANCE UPDATE
         user.balance = parseFloat((user.balance + finalAmount).toFixed(4));
-        if (taskId !== 'daily_bonus') {
+        if (!isBonusTask) {
             user.dailyTaskEarnings = parseFloat((user.dailyTaskEarnings + finalAmount).toFixed(4));
         }
         user.lastTaskTime = now; 
 
         // 💸 10% EARLY BIRD COMMISSION
-        if (user.referredBy && !user.hasWithdrawnEver && taskId !== 'daily_bonus') {
+        if (user.referredBy && !user.hasWithdrawnEver && !isBonusTask) {
             const upline = await User.findOne({ deviceId: user.referredBy });
             if (upline) {
                 const commission = finalAmount * 0.10;
@@ -753,7 +755,7 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         }
 
         // 🎫 GOLD PASS METER UPDATE
-        if (taskId !== 'daily_bonus') {
+        if (!isBonusTask) {
             user.dailyTaskMeter += finalAmount;
             if (user.dailyTaskMeter >= 50.0 && !user.goldenPassUnlocked) { user.goldenPassUnlocked = true; }
         }
