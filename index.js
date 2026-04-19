@@ -236,70 +236,58 @@ cron.schedule('55 20 * * *', async () => {
     try { await db.ref('live_arena/current_question').set({ status: "HYPE" }); } catch(e) { }
 }, { timezone: "Asia/Kolkata" });
 
-// 🔔 4. THE 8:50 PM ALARM (Memory-Safe Notification Sender)
+// 🔔 4. THE 8:50 PM ALARM (Ghost Token Cleaner & Safe Sender)
 cron.schedule('50 20 * * *', async () => {
     console.log("🔔 8:50 PM: Sending FCM Notification in batches...");
     try {
-        // Cursor memory leak nahi hone dega
-        const cursor = User.find({ fcmToken: { $ne: "", $exists: true } }).select('fcmToken').cursor();
-        
+        const cursor = User.find({ fcmToken: { $ne: "", $exists: true } }).select('fcmToken deviceId').cursor();
         let tokens = [];
+        
         for await (const doc of cursor) {
             tokens.push(doc.fcmToken);
             
-            if (tokens.length === 500) { // Firebase ki max limit 500 hai
-                await admin.messaging().sendEachForMulticast({
+            if (tokens.length === 500) { 
+                const response = await admin.messaging().sendEachForMulticast({
                     notification: { title: "🔥 KBC Arena starts in 5 mins!", body: "Hurry up! Win ₹50,000 Cash! Open the app now! 💸" },
                     tokens: tokens
                 }).catch(e => console.log("Batch push failed, ignoring..."));
-                tokens = [];
+
+                // 🧹 GHOST TOKEN CLEANUP LOGIC
+                if (response && response.failureCount > 0) {
+                    const failedTokens = [];
+                    response.responses.forEach((resp, idx) => {
+                        if (!resp.success && (resp.error.code === 'messaging/registration-token-not-registered' || resp.error.code === 'messaging/invalid-registration-token')) {
+                            failedTokens.push(tokens[idx]);
+                        }
+                    });
+                    if (failedTokens.length > 0) {
+                        await User.updateMany({ fcmToken: { $in: failedTokens } }, { $set: { fcmToken: "" } });
+                    }
+                }
+                tokens = []; 
             }
         }
-        if (tokens.length > 0) { // Bache hue 500 se kam logo ko bhejo
-            await admin.messaging().sendEachForMulticast({
+        
+        if (tokens.length > 0) { 
+            const response = await admin.messaging().sendEachForMulticast({
                 notification: { title: "🔥 KBC Arena starts in 5 mins!", body: "Hurry up! Win ₹50,000 Cash! Open the app now! 💸" },
                 tokens: tokens
             }).catch(e => {});
+
+            if (response && response.failureCount > 0) {
+                const failedTokens = [];
+                response.responses.forEach((resp, idx) => {
+                    if (!resp.success && (resp.error.code === 'messaging/registration-token-not-registered' || resp.error.code === 'messaging/invalid-registration-token')) {
+                        failedTokens.push(tokens[idx]);
+                    }
+                });
+                if (failedTokens.length > 0) {
+                    await User.updateMany({ fcmToken: { $in: failedTokens } }, { $set: { fcmToken: "" } });
+                }
+            }
         }
-        console.log(`✅ Safely sent all notifications!`);
+        console.log(`✅ Safely sent all notifications and cleaned DB!`);
     } catch(e) { console.error("❌ FCM Error:", e); }
-}, { timezone: "Asia/Kolkata" });
-
-// 🎬 3. THE 9:00 PM LIVE KBC ENGINE
-cron.schedule('0 21 * * *', async () => {
-    console.log("💥 9:00 PM: LIVE JACKPOT STARTED!");
-    try {
-        // Fetch Unused Question
-        const question = await LiveQuestion.findOne({ isUsed: false });
-        if (!question) {
-            console.log("🚨 NO UNUSED QUESTIONS FOUND!");
-            await db.ref('live_arena/current_question').set({ status: "WAITING" });
-            return;
-        }
-
-        // Push Question to 1 Lakh Devices in 100ms
-        await db.ref('live_arena/current_question').set({
-            q_id: question._id.toString(),
-            status: "ACTIVE",
-            question_en: question.question_en,
-            question_hi: question.question_hi,
-            options_en: question.options_en,
-            options_hi: question.options_hi,
-            timestamp: Date.now() // For strict backend evaluation
-        });
-
-        // Lock Question
-        question.isUsed = true;
-        question.usedDate = new Date();
-        await question.save();
-
-        // ⏱️ 10.5 SECOND AUTO-LOCK MECHANISM
-        setTimeout(async () => {
-            console.log("🔒 10.5 SECONDS UP! Locking Arena...");
-            await db.ref('live_arena/current_question').update({ status: "FINISHED" });
-        }, 10500);
-
-    } catch(e) { console.error("KBC Engine Error:", e); }
 }, { timezone: "Asia/Kolkata" });
 
 // ==========================================
@@ -326,14 +314,14 @@ const verifyAppSignature = async (req, res, next) => {
         return res.status(403).json({ error: "🛑 ACCESS DENIED: Missing Security Headers" });
     }
 
-    // 1. FIREBASE AUTH CHECK (Botnet Killer - CRASH FIXED)
+    // 1. FIREBASE AUTH CHECK (Botnet Killer)
     if (!authHeader.startsWith('Bearer ')) {
         return res.status(403).json({ error: "🛑 INVALID AUTH FORMAT" });
     }
     const idToken = authHeader.split('Bearer ')[1];
     try {
         const decodedToken = await admin.auth().verifyIdToken(idToken);
-        req.userEmail = decodedToken.email; // Asli email Firebase se nikala!
+        req.userEmail = decodedToken.email; 
     } catch (err) {
         console.log(`🚨 FAKE GOOGLE LOGIN ATTEMPT: ${req.ip}`);
         return res.status(403).json({ error: "🛑 FAKE ACCOUNT BLOCKED!" });
@@ -345,7 +333,7 @@ const verifyAppSignature = async (req, res, next) => {
         return res.status(403).json({ error: "🛑 EXPIRED REQUEST" });
     }
     
-    // 🔥 REDIS NONCE CACHE (Memory Leak Fix)
+    // 🔥 REDIS NONCE CACHE
     const isNonceUsed = await safeRedisGet(`nonce_${nonce}`);
     if (isNonceUsed) {
         console.log(`🚨 REPLAY ATTACK BLOCKED from ${req.userEmail}`);
@@ -353,18 +341,24 @@ const verifyAppSignature = async (req, res, next) => {
     }
     await safeRedisSet(`nonce_${nonce}`, "used", { EX: 60 });
 
-    // 3. HMAC SIGNATURE CHECK (Tamper Proofing)
-    const payload = req.rawBody || ""; // 🎯 FIXED: Ab exact wahi data check hoga jo app ne bheja tha
-    const expectedSignature = crypto.createHmac('sha256', APP_SECRET)
-                                    .update(payload + timestamp + nonce) // Nonce hash mein add kiya
-                                    .digest('hex');
+    // 3. HMAC SIGNATURE CHECK (Tamper Proofing & Crash Prevention)
+    try {
+        const payloadString = req.rawBody ? String(req.rawBody) : ""; 
+        const expectedSignature = crypto.createHmac('sha256', APP_SECRET)
+                                        .update(payloadString + timestamp + nonce) 
+                                        .digest('hex');
 
-    if (signature !== expectedSignature) {
-        return res.status(403).json({ error: "🛑 INVALID SIGNATURE" });
+        if (signature !== expectedSignature) {
+            console.log(`🚨 SIGNATURE MISMATCH for ${req.userEmail}`);
+            return res.status(403).json({ error: "🛑 INVALID SIGNATURE OR TAMPERED DATA" });
+        }
+    } catch (hashError) {
+        console.error("❌ Hash Generation Error:", hashError.message);
+        return res.status(500).json({ error: "🛑 SECURITY PROCESSING ERROR" });
     }
 
-    // 4. IDENTITY MISMATCH CHECK (Hacker dusre ka email use nahi kar sakta)
-    if (req.body.deviceId && req.body.deviceId !== req.userEmail) {
+    // 4. IDENTITY MISMATCH CHECK
+    if (req.body && req.body.deviceId && req.body.deviceId !== req.userEmail) {
         return res.status(403).json({ error: "🛑 IDENTITY THEFT BLOCKED!" });
     }
 
@@ -424,7 +418,8 @@ app.post('/premium-deals', verifyAppSignature, async (req, res) => {
             let basePayout = parseFloat(payoutString.replace(/[^0-9.]/g, '')) || 0; 
             
             if (payoutString.includes('$') || payoutString.includes('USD') || (camp.currency && camp.currency.toUpperCase() === 'USD')) {
-                basePayout = basePayout * 83; // USD to INR conversion
+                const exchangeRate = parseFloat(process.env.USD_RATE) || 83.0; 
+                basePayout = basePayout * exchangeRate; 
             }
             // --- SMART PAYOUT PARSER END ---
 
@@ -656,42 +651,55 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
     }
 });
 
-// B. SECURE UPDATE BALANCE (With Auto-Clicker, Bonus & Dynamic Protection)
+// B. SECURE UPDATE BALANCE (With Auto-Clicker & Race Condition Protection)
 app.post('/updateBalance', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail;
     const { taskId, dynamicAmount } = req.body; 
     if (!deviceId || !taskId) return res.status(400).json({ error: "Missing data" });
 
+    // 🛡️ NAYA: REDIS MUTEX LOCK (Double-Tap / Race Condition Killer)
+    const lockKey = `tx_lock_${deviceId}`;
+    const isLocked = await safeRedisGet(lockKey);
+    if (isLocked) {
+        console.log(`🚨 RACE CONDITION BLOCKED for ${deviceId}`);
+        return res.status(429).json({ error: "⏳ Processing... please wait." });
+    }
+    // Set lock for 3 seconds
+    await safeRedisSet(lockKey, "LOCKED", { EX: 3 });
+
     try {
         const user = await User.findOne({ deviceId });
-        if (!user) return res.status(404).json({ error: "User not found" });
+        if (!user) {
+            await safeRedisDel(lockKey); 
+            return res.status(404).json({ error: "User not found" });
+        }
 
         const now = new Date();
         const today = getISTDateString();
 
-        // 🔥 Daily Reset Logic (Fail-safe for Midnight)
+        // 🔥 Daily Reset Logic
         if (user.lastTaskDate !== today) { 
             user.dailyTaskEarnings = 0; 
             user.lastTaskDate = today; 
             user.scratchCountToday = 0; 
-            user.dailyTaskMeter = 0;             // 👈 Raat 12 baje meter 0 karega
-            user.goldenPassUnlocked = false;     // 👈 Pass lock ho jayega
-            user.isEliminatedToday = false;      // 👈 Game status reset
+            user.dailyTaskMeter = 0;            
+            user.goldenPassUnlocked = false;    
+            user.isEliminatedToday = false;     
         }
 
         // 🛑 1. DAILY BONUS HACK BLOCKER
         if (taskId === 'daily_bonus') {
             if (user.lastBonusDate === today) {
-                console.log(`🚨 BONUS HACK ATTEMPT by ${deviceId}`);
+                await safeRedisDel(lockKey);
                 return res.status(429).json({ error: "🚫 Hack Attempt! Bonus already claimed today." });
             }
             user.lastBonusDate = today; 
         }
 
-        // 🛑 2. SCRATCH CARD HACK BLOCKER (Sirf 5 per day)
+        // 🛑 2. SCRATCH CARD HACK BLOCKER
         if (taskId === 'scratch_card') {
             if (user.scratchCountToday >= 5) {
-                console.log(`🚨 SCRATCH HACK ATTEMPT by ${deviceId}`);
+                await safeRedisDel(lockKey);
                 return res.status(429).json({ error: "🚫 Daily Scratch Limit Reached!" });
             }
             user.scratchCountToday += 1; 
@@ -700,39 +708,37 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         // 🛑 3. RATE LIMITING
         if (user.lastTaskTime) {
             const timeDiff = (now - user.lastTaskTime) / 1000; 
-            
             if (taskId === 'vip_radio_ping') {
-                if (timeDiff < 55) return res.status(429).json({ error: "⏳ Radio Speed Hack Detected!" });
+                if (timeDiff < 55) { await safeRedisDel(lockKey); return res.status(429).json({ error: "⏳ Radio Speed Hack Detected!" }); }
             } else if (taskId !== 'daily_bonus' && taskId !== 'scratch_card' && !taskId.includes("Flash Task")) {
-                if (timeDiff < 5) return res.status(429).json({ error: "⏳ Too fast! System cooling down." }); 
+                if (timeDiff < 5) { await safeRedisDel(lockKey); return res.status(429).json({ error: "⏳ Too fast! System cooling down." }); }
             }
         }
 
-        // 💰 REWARD ASSIGNMENT (The Fix)
+        // 💰 REWARD ASSIGNMENT
         let finalAmount = 0;
-        
         if (taskId === 'scratch_card') {
             finalAmount = parseFloat((Math.random() * 0.07 + 0.02).toFixed(2));
         } else if (TASK_REWARDS[taskId]) {
-            // Static Tasks (Math, Quiz, etc)
             finalAmount = TASK_REWARDS[taskId]; 
         } else if (taskId.startsWith("Flash Task") || taskId === 'unknown' || taskId === 'weekly_bonus') {
-            // 🔥 NAYA: 'weekly_bonus' ko allow kiya
             const reqAmount = parseFloat(dynamicAmount) || 0;
             if (reqAmount > 0 && reqAmount <= 50) {
                 finalAmount = reqAmount;
             } else {
+                await safeRedisDel(lockKey);
                 return res.status(400).json({ error: "Invalid Dynamic Amount" });
             }
         } else {
+            await safeRedisDel(lockKey);
             return res.status(400).json({ error: "Invalid Task ID" });
         }
 
-        // 🛑 HELPER: Check if it's a bonus task (Bonus tasks meters mein add nahi hote)
         const isBonusTask = (taskId === 'daily_bonus' || taskId === 'weekly_bonus');
 
-        // 🛑 MAX DAILY LIMIT CHECK (Taaki app bankrupt na ho)
+        // 🛑 MAX DAILY LIMIT CHECK
         if (user.dailyTaskEarnings + finalAmount > 50.0 && !isBonusTask) {
+            await safeRedisDel(lockKey);
             return res.status(429).json({ error: "Daily limit reached. Use Premium Offers for unlimited earning!" });
         }
 
@@ -762,26 +768,18 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 
         await user.save();
         
-        // 🔥 NAYA: UPDATE REDIS CACHE SO NEXT PING GETS NEW BALANCE
         const redisKey = `user_${deviceId}`;
         await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 }); 
+
+        // 🛡️ KAAM POORA HONE KE BAAD LOCK KHOL DO
+        await safeRedisDel(lockKey);
 
         res.json({ success: true, addedAmount: finalAmount, newBalance: user.balance, dailyMeter: user.dailyTaskMeter, isUnlocked: user.goldenPassUnlocked });
     } catch (e) { 
         console.error("Update Balance Error:", e);
+        await safeRedisDel(lockKey); 
         res.status(500).json({ error: "Server Error" }); 
     }
-});
-
-// 🔔 ROUTE: Naye user ka Notification Token Save karne ke liye
-app.post('/update-fcm', verifyAppSignature, async (req, res) => {
-    try {
-        await User.findOneAndUpdate(
-            { deviceId: req.userEmail }, 
-            { fcmToken: req.body.fcmToken }
-        );
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: "FCM Update Error" }); }
 });
 
 // ==========================================
