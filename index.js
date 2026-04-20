@@ -80,6 +80,15 @@ const safeRedisDel = async (key) => {
     try { await redisClient.del(key); } catch(e) {} // ✅ Yahan redisClient hona chahiye
 };
 
+// 🛡️ FIX 2: Atomic Lock Function (Returns true if lock acquired, false if already locked)
+const safeRedisSetNX = async (key, value, ttlSeconds) => {
+    if (!isRedisConnected) return true; // Fallback so app works if Redis dies
+    try { 
+        const result = await redisClient.set(key, value, { NX: true, EX: ttlSeconds }); 
+        return result === 'OK'; 
+    } catch(e) { return true; }
+};
+
 // ==========================================
 // 🕒 IST TIMEZONE HELPER
 // ==========================================
@@ -185,6 +194,13 @@ const usedDeviceSchema = new mongoose.Schema({
     hardwareId: { type: String, unique: true }
 });
 const UsedDevice = mongoose.model('UsedDevice', usedDeviceSchema);
+// 🛡️ ANTI-HACK: IP Tracker to block App Cloners and Bot Farms
+const ipTrackerSchema = new mongoose.Schema({
+    ipAddress: { type: String, required: true, unique: true },
+    count: { type: Number, default: 1 },
+    lastUsed: { type: Date, default: Date.now }
+});
+const IPTracker = mongoose.model('IPTracker', ipTrackerSchema);
 
 // 🛡️ ANTI-HACK: Offerwall Transaction Log
 const offerwallTxSchema = new mongoose.Schema({
@@ -567,6 +583,43 @@ app.post('/regular-deals', verifyAppSignature, async (req, res) => {
     }
 });
 
+// ==========================================
+// 🔔 SECURE ROUTE: SAVE FCM TOKEN FOR NOTIFICATIONS
+// ==========================================
+app.post('/update-fcm', verifyAppSignature, async (req, res) => {
+    const deviceId = req.userEmail; // verifyAppSignature middleware se aayega
+    const { fcmToken } = req.body;
+    
+    if (!deviceId || !fcmToken) {
+        return res.status(400).json({ error: "Missing FCM token" });
+    }
+
+    try {
+        // 1. Update token in MongoDB safely
+        await User.updateOne(
+            { deviceId: deviceId }, 
+            { $set: { fcmToken: fcmToken } }
+        );
+        
+        // 2. Update token in Redis Cache (Bohot zaroori hai taaki cache out-of-sync na ho)
+        const redisKey = `user_${deviceId}`;
+        const cachedUser = await safeRedisGet(redisKey);
+        
+        if (cachedUser) {
+            let userObj = JSON.parse(cachedUser);
+            userObj.fcmToken = fcmToken;
+            await safeRedisSet(redisKey, JSON.stringify(userObj), { EX: 900 });
+        }
+
+        console.log(`🔔 FCM Token successfully saved for: ${deviceId}`);
+        res.json({ success: true, message: "Token safely stored for KBC notifications." });
+
+    } catch (e) {
+        console.error("❌ FCM Token Save Error:", e);
+        res.status(500).json({ error: "Server Error while saving token." });
+    }
+});
+
 // A. PING (Now Secured & Redis Cached! ⚡)
 app.post('/ping', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail; 
@@ -623,21 +676,25 @@ app.post('/ping', verifyAppSignature, async (req, res) => {
                 
                 if (user.referredBy && !user.hasWithdrawnEver) {
                     const upline = await User.findOne({ deviceId: user.referredBy });
-                    if (upline) { upline.balance += (earning * 0.10); await upline.save(); }
+                    if (upline) { 
+                        const commission = earning * 0.10;
+                        upline.balance = parseFloat((upline.balance + commission).toFixed(4)); 
+                        await upline.save(); 
+                    }
                 }
             }
         }
 
-        if (usage && user.totalData !== usage) { 
-            user.totalData = usage; 
+        // 🛡️ FIX 4: INCREMENT TOTAL DATA, DON'T OVERWRITE
+        if (usage && usage > 0) { 
+            user.totalData = parseFloat((user.totalData + usage).toFixed(4)); 
             needsDbUpdate = true; 
         }
-        
         // 💾 3. DATA CHANGE HUA HAI TOH DB AUR REDIS UPDATE KARO
         if (needsDbUpdate) {
             user.lastActive = now;
             await User.updateOne({ deviceId }, { $set: user }); 
-            await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 }); 
+            await safeRedisSet(redisKey, JSON.stringify(user), { EX: 900 });
         }
 
         res.json({ 
@@ -657,15 +714,14 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
     const { taskId, dynamicAmount } = req.body; 
     if (!deviceId || !taskId) return res.status(400).json({ error: "Missing data" });
 
-    // 🛡️ NAYA: REDIS MUTEX LOCK (Double-Tap / Race Condition Killer)
+   // 🛡️ FIX 2: TRUE ATOMIC REDIS MUTEX LOCK
     const lockKey = `tx_lock_${deviceId}`;
-    const isLocked = await safeRedisGet(lockKey);
-    if (isLocked) {
+    const lockAcquired = await safeRedisSetNX(lockKey, "LOCKED", 3);
+    
+    if (!lockAcquired) {
         console.log(`🚨 RACE CONDITION BLOCKED for ${deviceId}`);
         return res.status(429).json({ error: "⏳ Processing... please wait." });
     }
-    // Set lock for 3 seconds
-    await safeRedisSet(lockKey, "LOCKED", { EX: 3 });
 
     try {
         const user = await User.findOne({ deviceId });
@@ -718,7 +774,16 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         // 💰 REWARD ASSIGNMENT
         let finalAmount = 0;
         if (taskId === 'scratch_card') {
-            finalAmount = parseFloat((Math.random() * 0.07 + 0.02).toFixed(2));
+            // 🛡️ SECURITY FIX: Frontend ka amount lenge, par strict validation ke sath!
+            const reqAmount = parseFloat(dynamicAmount) || 0;
+            
+            // Frontend generate karta hai 0.02 se 0.09 ke beech.
+            if (reqAmount >= 0.02 && reqAmount <= 0.10) {
+                finalAmount = reqAmount;
+            } else {
+                console.log(`🚨 HACK ATTEMPT BLOCKED: Invalid Scratch Amount from ${deviceId}`);
+                finalAmount = 0.02; // Fallback to minimum safe amount
+            }
         } else if (TASK_REWARDS[taskId]) {
             finalAmount = TASK_REWARDS[taskId]; 
         } else if (taskId.startsWith("Flash Task") || taskId === 'unknown' || taskId === 'weekly_bonus') {
@@ -754,8 +819,9 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
             const upline = await User.findOne({ deviceId: user.referredBy });
             if (upline) {
                 const commission = finalAmount * 0.10;
-                upline.balance += commission;
-                upline.networkEarnings += commission;
+                // 🛡️ FIX 3: FLOAT MATH CORRECTION
+                upline.balance = parseFloat((upline.balance + commission).toFixed(4));
+                upline.networkEarnings = parseFloat((upline.networkEarnings + commission).toFixed(4));
                 await upline.save();
             }
         }
@@ -769,7 +835,7 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
         await user.save();
         
         const redisKey = `user_${deviceId}`;
-        await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 }); 
+        await safeRedisSet(redisKey, JSON.stringify(user), { EX: 900 });
 
         // 🛡️ KAAM POORA HONE KE BAAD LOCK KHOL DO
         await safeRedisDel(lockKey);
@@ -782,84 +848,70 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
     }
 });
 
+
 // ==========================================
-// 💸 SERVER-TO-SERVER POSTBACK (For CPX & Monlix)
+// 💸 SECURE SERVER-TO-SERVER POSTBACK (POST Method)
 // ==========================================
-app.get('/postback', async (req, res) => {
-    // 🛡️ ANTI-HACK: Verify the secret key from the offerwall
-    const secret = req.query.secret || req.query.hash;
+app.post('/postback', async (req, res) => {
+    // 🛡️ 1. IP WHITELISTING
+    const allowedIps = ['127.0.0.1', '::1']; 
+    const incomingIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+    // 🛡️ 2. SECRET KEY CHECK
+    const secret = req.body.secret || req.query.secret || req.headers['x-postback-secret'];
     if (secret !== process.env.OFFERWALL_SECRET) {
-        console.error("🚨 FAKE POSTBACK BLOCKED! Invalid Secret.");
+        console.error(`🚨 FAKE POSTBACK BLOCKED! Invalid Secret from IP: ${incomingIp}`);
         return res.status(403).send("0");
     }
 
-    const deviceId = req.query.ext_user_id || req.query.userid || req.query.subId; 
-    const amount = parseFloat(req.query.amount || req.query.reward);
-    
-    // 🛡️ NAYA: Extract Transaction ID
-    const txId = req.query.tx_id || req.query.transaction_id || req.query.id || req.query.click_id;
+    const deviceId = req.body.ext_user_id || req.body.userid; 
+    const amount = parseFloat(req.body.amount || req.body.reward);
+    const txId = req.body.tx_id || req.body.transaction_id;
 
     if (!deviceId || isNaN(amount) || !txId) {
-        console.error("❌ Postback Failed: Missing Parameters", req.query);
         return res.status(400).send("0"); 
     }
 
     try {
-        // 🛡️ NAYA: Check Replay Attack (Kya ye TxID pehle process ho chuki hai?)
         const existingTx = await OfferwallTx.findOne({ txId });
-        if (existingTx) {
-            console.log(`⚠️ REPLAY ATTACK AVERTED: TxID ${txId} already processed.`);
-            return res.status(200).send("1"); // Network ko '1' bhejte hain taaki wo retry na kare
-        }
+        if (existingTx) return res.status(200).send("1"); 
+
+        await new OfferwallTx({ txId, deviceId, amount }).save();
 
         const user = await User.findOne({ deviceId });
-        if (!user) {
-            console.error("❌ Postback Failed: User Not Found", deviceId);
-            return res.status(404).send("0");
-        }
+        if (!user) return res.status(404).send("0");
 
-        // Add money to user's wallet
-        user.balance += amount;
+        user.balance = parseFloat((user.balance + amount).toFixed(4));
+        user.dailyTaskMeter = parseFloat((user.dailyTaskMeter + amount).toFixed(4));
 
-        // 💸 10% EARLY BIRD COMMISSION
-        if (user.referredBy && !user.hasWithdrawnEver) {
-            const upline = await User.findOne({ deviceId: user.referredBy });
-            if (upline) {
-                const commission = amount * 0.10;
-                upline.balance += commission;
-                upline.networkEarnings += commission;
-                await upline.save();
-            }
-        }
-        
-        // 🔥 Update KBC Golden Pass Meter
-        user.dailyTaskMeter += amount;
         if (user.dailyTaskMeter >= 50.0 && !user.goldenPassUnlocked) { 
             user.goldenPassUnlocked = true; 
         }
 
-        await user.save();
-        
-        // 🛡️ NAYA: TRANSACTION LOG MEIN SAVE KARO TAAKI DUBARA NA AAYE
-        await new OfferwallTx({ txId, deviceId, amount }).save();
-        
-        // 🔥 NAYA: Redis update karo offerwall earnings ke liye
-        const redisKey = `user_${deviceId}`;
-        await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 });
+        if (user.referredBy && !user.hasWithdrawnEver) {
+            const upline = await User.findOne({ deviceId: user.referredBy });
+            if (upline) {
+                const commission = amount * 0.10;
+                upline.balance = parseFloat((upline.balance + commission).toFixed(4));
+                upline.networkEarnings = parseFloat((upline.networkEarnings + commission).toFixed(4));
+                await upline.save();
+                await safeRedisSet(`user_${upline.deviceId}`, JSON.stringify(upline), { EX: 900 });
+            }
+        }
 
-        console.log(`✅ POSTBACK SUCCESS: ₹${amount} added to ${deviceId}`);
+        await user.save();
+        await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 900 });
         
         res.status(200).send("1"); 
     } catch (e) {
-        console.error("❌ Postback Server Error:", e);
         res.status(500).send("0");
     }
 });
 
-// 🎯 LIVE ARENA ANSWER EVALUATOR (Now Buffer Secured)
+// 🎯 LIVE ARENA ANSWER EVALUATOR
 app.post('/submit-answer', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail;
-    const { q_id, answer } = req.body; // time_taken_ms yahan use nahi hota, backend time use hota hai
+    const { q_id, answer } = req.body;
     try {
         const user = await User.findOne({ deviceId });
         if (!user || user.isEliminatedToday || !user.goldenPassUnlocked) {
@@ -872,10 +924,11 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
         const currentData = await db.ref('live_arena/current_question').once('value');
         const rtdbData = currentData.val();
         
-        // 🛡️ NAYA: 13 Second ka Buffer diya hai (Network Ping Latency bachaane ke liye)
-        const isTimeOver = (Date.now() - rtdbData.timestamp) > 13000; 
+        const serverTimeReceived = Date.now();
+        const timeDiff = serverTimeReceived - rtdbData.timestamp;
 
-        if (isTimeOver || answer !== question.correctAnswer) {
+        // 🛡️ BOT CHECK & TIMEOUT (1.5s to 12s window)
+        if (timeDiff < 1500 || timeDiff > 12000 || answer !== question.correctAnswer) {
             user.isEliminatedToday = true;
             await user.save();
             return res.json({ success: false, message: "Eliminated" });
@@ -886,11 +939,7 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
             user.balance += 50.00; 
             user.lastArenaWinDate = today;
             await user.save();
-            
-            // 🔥 NAYA: Redis update karo taaki turant 50 Rs dikhein
-            const redisKey = `user_${deviceId}`;
-            await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 });
-
+            await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 900 });
             return res.json({ success: true, message: "Winner! ₹50 Added." });
         }
 
@@ -900,37 +949,44 @@ app.post('/submit-answer', verifyAppSignature, async (req, res) => {
     }
 });
 
-// 💸 BULLETPROOF WITHDRAW ROUTE (Double-Tap Hack Preventer)
+// 💸 BULLETPROOF WITHDRAW ROUTE
 app.post('/withdraw', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail;
     const { method, details, amount } = req.body; 
+
+    const lockKey = `withdraw_lock_${deviceId}`;
+    const lockAcquired = await safeRedisSetNX(lockKey, "LOCKED", 15); 
+    if (!lockAcquired) {
+        return res.status(429).json({ error: "⏳ Transaction already in progress." });
+    }
+
     try {
         const requestedAmount = Math.abs(parseFloat(amount)); 
         if (isNaN(requestedAmount) || requestedAmount < 50.0) {
+            await safeRedisDel(lockKey);
             return res.status(400).json({ message: "Minimum ₹50 required." });
         }
 
-        // 🔥 FIX: Atomic Update (MongoDB pehle paise kaatega, fir aage badhega. Double-tap fail ho jayega!)
         const user = await User.findOneAndUpdate(
-            { deviceId: deviceId, balance: { $gte: requestedAmount } }, // Check: Balance sufficient hai ya nahi
-            { $inc: { balance: -requestedAmount }, $set: { hasWithdrawnEver: true, upiId: details } }, // Deduct balance
+            { deviceId: deviceId, balance: { $gte: requestedAmount } },
+            { $inc: { balance: -requestedAmount }, $set: { hasWithdrawnEver: true, upiId: details } },
             { new: true }
         );
 
         if (!user) {
-            return res.status(400).json({ message: "Insufficient balance or invalid request!" });
+            await safeRedisDel(lockKey);
+            return res.status(400).json({ message: "Insufficient balance!" });
         }
 
-        // Ab database mein Payout ki entry daalo
-        const newPayout = new Payout({ deviceId, amount: requestedAmount, method, details });
-        await newPayout.save();
+        await new Payout({ deviceId, amount: requestedAmount, method, details }).save();
+        await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 900 });
 
-        // 🔥 NAYA: Redis ko batao ki paise kat gaye hain
-        const redisKey = `user_${deviceId}`;
-        await safeRedisSet(redisKey, JSON.stringify(user), { EX: 3600 });
-
+        await safeRedisDel(lockKey);
         res.json({ status: "success", message: "Request Sent to Admin!" });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+        await safeRedisDel(lockKey);
+        res.status(500).json({ error: e.message }); 
+    }
 });
 app.post('/submit-solar-lead', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail; 
@@ -986,8 +1042,21 @@ app.post('/my-transactions', verifyAppSignature, async (req, res) => {
 app.post('/bindReferral', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail; 
     const { hardwareId, promoCode } = req.body;
+    
+    // 🌐 NAYA: Extract actual IP Address of the user
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "unknown_ip";
+
     try {
-        // 🛡️ 1. HARDWARE ID BLACKLIST CHECK (The Ultimate Fix)
+        // 🛡️ 1. IP ADDRESS RATE LIMITING (Bot Farm Killer)
+        if (clientIp !== "unknown_ip") {
+            const ipRecord = await IPTracker.findOne({ ipAddress: clientIp });
+            if (ipRecord && ipRecord.count >= 2) {
+                console.log(`🚨 BOT FARM BLOCKED: IP ${clientIp} exceeded referral limit!`);
+                return res.status(403).json({ error: "Multiple accounts detected from your network. Claim blocked!" });
+            }
+        }
+
+        // 🛡️ 2. HARDWARE ID BLACKLIST CHECK
         if (hardwareId && hardwareId !== "unknown_device") {
             const isBlacklisted = await UsedDevice.findOne({ hardwareId: hardwareId });
             if (isBlacklisted) {
@@ -997,7 +1066,6 @@ app.post('/bindReferral', verifyAppSignature, async (req, res) => {
         }
         
         let user = await User.findOne({ deviceId });
-        
         if (!user) {
             const baseName = deviceId.split('@')[0].toUpperCase();
             user = new User({ deviceId: deviceId, referralCode: "VELO-" + baseName, hardwareId: hardwareId });
@@ -1006,27 +1074,36 @@ app.post('/bindReferral', verifyAppSignature, async (req, res) => {
             return res.status(400).json({ error: "Referral already claimed!" });
         }
 
-        // 2. Referrer (Dost) Ka Code Check Karo
+        // 3. Referrer (Dost) Ka Code Check Karo
         const referrer = await User.findOne({ referralCode: promoCode });
         if (!referrer) return res.status(400).json({ error: "Invalid VIP Code!" });
         if (referrer.deviceId === deviceId) return res.status(400).json({ error: "Cannot use your own code!" });
 
-        // 3. Dost Ko ₹10 Bonus Do
-        referrer.balance += 10.00; 
+        // 4. Dost Ko ₹10 Bonus Do Safely
+        referrer.balance = parseFloat((referrer.balance + 10.00).toFixed(4)); 
         referrer.totalInvites += 1; 
         await referrer.save();
-        await safeRedisSet(`user_${referrer.deviceId}`, JSON.stringify(referrer), { EX: 3600 }); // 🔥 NAYA
+        await safeRedisSet(`user_${referrer.deviceId}`, JSON.stringify(referrer), { EX: 900 }); 
 
-        // 4. Naye User ki profile update karo
+        // 5. Naye User ki profile update karo
         user.referredBy = referrer.deviceId; 
         user.hardwareId = hardwareId; 
         user.hasClaimedReferral = true; 
         await user.save();
-        await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
+        await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 900 }); 
 
-        // 🛡️ 5. PHONE KO HAMESHA KE LIYE BLACKLIST KAR DO
+        // 🛡️ 6. PHONE KO HAMESHA KE LIYE BLACKLIST KAR DO
         if (hardwareId && hardwareId !== "unknown_device") {
-            await new UsedDevice({ hardwareId: hardwareId }).save().catch(() => {}); // Error ignore if already exists
+            await new UsedDevice({ hardwareId: hardwareId }).save().catch(() => {}); 
+        }
+
+        // 🛡️ 7. IP ADDRESS KO TRACK KARO
+        if (clientIp !== "unknown_ip") {
+            await IPTracker.findOneAndUpdate(
+                { ipAddress: clientIp },
+                { $inc: { count: 1 }, $set: { lastUsed: Date.now() } },
+                { upsert: true }
+            );
         }
 
         res.json({ success: true, message: "Referral Applied!" });
@@ -1108,7 +1185,7 @@ app.post('/admin/reject', adminAuth, async (req, res) => {
         if (user) {
             user.balance += payout.amount;
             await user.save();
-            await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); // 🔥 NAYA
+            await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 900 }); // 🔥 NAYA
         }
 
         // Payout ko cancel kar do
@@ -1148,7 +1225,7 @@ app.post('/admin/update-solar-lead', adminAuth, async (req, res) => {
                 
                 user.balance += payoutAmount; 
                 await user.save(); 
-                await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); 
+                await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 900 }); 
             }
         }
         res.json({ success: true });
@@ -1174,7 +1251,7 @@ app.post('/admin/update-yoga-lead', adminAuth, async (req, res) => {
             if (user) { 
                 user.balance += 300.00; // 👈 USER KO YAHAN SE ₹300 MILENGE
                 await user.save(); 
-                await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 3600 }); 
+                await safeRedisSet(`user_${user.deviceId}`, JSON.stringify(user), { EX: 900 }); 
             }
         }
         res.json({ success: true });
