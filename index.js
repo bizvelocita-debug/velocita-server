@@ -875,23 +875,23 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 
 
 // ==========================================
-// 💸 SECURE SERVER-TO-SERVER POSTBACK (POST Method)
+// 💸 SECURE SERVER-TO-SERVER POSTBACK (GET Method for CPX)
 // ==========================================
-app.post('/postback', async (req, res) => {
-    // 🛡️ 1. IP WHITELISTING
-    const allowedIps = ['127.0.0.1', '::1']; 
+// 🚀 NAYA: app.post ki jagah app.get kar diya
+app.get('/postback', async (req, res) => {
     const incomingIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    // 🛡️ 2. SECRET KEY CHECK
-    const secret = req.body.secret || req.query.secret || req.headers['x-postback-secret'];
+    // 🛡️ 1. SECRET KEY CHECK (URL Query se padhega)
+    const secret = req.query.secret || req.headers['x-postback-secret'];
     if (secret !== process.env.OFFERWALL_SECRET) {
         console.error(`🚨 FAKE POSTBACK BLOCKED! Invalid Secret from IP: ${incomingIp}`);
         return res.status(403).send("0");
     }
 
-    const deviceId = req.body.ext_user_id || req.body.userid; 
-    const amount = parseFloat(req.body.amount || req.body.reward);
-    const txId = req.body.tx_id || req.body.transaction_id;
+    // 🚀 NAYA: req.body ki jagah req.query lagaya hai
+    const deviceId = req.query.ext_user_id || req.query.userid; 
+    const amount = parseFloat(req.query.amount || req.query.reward);
+    const txId = req.query.tx_id || req.query.transaction_id;
 
     if (!deviceId || isNaN(amount) || !txId) {
         return res.status(400).send("0"); 
@@ -899,7 +899,7 @@ app.post('/postback', async (req, res) => {
 
     try {
         const existingTx = await OfferwallTx.findOne({ txId });
-        if (existingTx) return res.status(200).send("1"); 
+        if (existingTx) return res.status(200).send("1"); // Already processed
 
         await new OfferwallTx({ txId, deviceId, amount }).save();
 
@@ -927,7 +927,7 @@ app.post('/postback', async (req, res) => {
         await user.save();
         await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 900 });
         
-        res.status(200).send("1"); 
+        res.status(200).send("1"); // CPX expects "1" for success
     } catch (e) {
         res.status(500).send("0");
     }
