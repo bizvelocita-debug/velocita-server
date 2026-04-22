@@ -392,7 +392,8 @@
 
         async function loadAllData() {
             try {
-                const options = {}; // Add headers if adminAuth uses Bearer tokens later
+                // 🚀 NAYA: Basic Auth headers attach karne ke liye 'credentials' property
+                const options = { credentials: 'same-origin' }; 
 
                 const userRes = await fetch(USERS_URL, options);
                 if (!userRes.ok) throw new Error("Auth Failed");
@@ -492,7 +493,10 @@
             solarLeads.forEach(lead => {
                 if (lead.status !== "Paid") {
                     pendingSolarCount++;
-                    let statusBadge = lead.status === 'Pending' ? `<span style="color:var(--accent-amber); font-weight: 600;">Pending</span>` : `<span style="color:var(--accent-blue); font-weight: 600;">Verified</span>`;
+                    let statusBadge = '';
+                    if (lead.status === 'Pending') statusBadge = `<span style="color:var(--accent-amber); font-weight: 600;">Pending</span>`;
+                    else if (lead.status === 'Verified') statusBadge = `<span style="color:var(--accent-blue); font-weight: 600;">Verified</span>`;
+                    else if (lead.status === 'Rejected') statusBadge = `<span style="color:var(--accent-red); font-weight: 600;">Rejected</span>`;
                     
                     let dealInfo = "";
                     let payAmt = 1500;
@@ -515,8 +519,11 @@
                         <td>${dealInfo}</td>
                         <td>${statusBadge}</td>
                         <td>
-                            ${lead.status === 'Pending' ? `<button class="btn btn-verify" onclick="updateSolarStatus('${lead._id}', 'Verified', ${payAmt})">Verify Site</button>` : ''}
-                            <button class="btn ${btnClass}" onclick="updateSolarStatus('${lead._id}', 'Paid', ${payAmt})">Pay ₹${payAmt}</button>
+                            ${lead.status !== 'Rejected' ? `
+                                ${lead.status === 'Pending' ? `<button class="btn btn-verify" onclick="updateSolarStatus('${lead._id}', 'Verified', ${payAmt})">Verify</button>` : ''}
+                                <button class="btn btn-pay" onclick="updateSolarStatus('${lead._id}', 'Paid', ${payAmt})">Pay ₹${payAmt}</button>
+                                <button class="btn btn-reject" onclick="updateSolarStatus('${lead._id}', 'Rejected', 0)">Reject</button>
+                            ` : `<span style="color:var(--text-muted); font-size:11px;">Lead Rejected</span>`}
                         </td>
                     </tr>`;
                 }
@@ -576,7 +583,10 @@
 
             try {
                 const response = await fetch(ADD_QUESTION_URL, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    credentials: 'same-origin', // 👈 YEH ADD HUA
+                    body: JSON.stringify(payload)
                 });
                 
                 if(response.ok) {
@@ -589,7 +599,12 @@
 
         async function markAsPaid(payoutId) {
             if(!confirm("Approve this payout?")) return;
-            await fetch(PAY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payoutId: payoutId }) });
+            await fetch(PAY_URL, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                credentials: 'same-origin', // 👈 YEH ADD HUA
+                body: JSON.stringify({ payoutId: payoutId }) 
+            });
             loadAllData();
         }
 
@@ -597,7 +612,11 @@
             if(!confirm("⚠️ REJECT PAYOUT?\n\nThis will cancel the transfer and refund the amount to the user's wallet. Proceed?")) return;
             try {
                 const response = await fetch("/admin/reject", { 
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payoutId: payoutId }) 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    credentials: 'same-origin', // 👈 YEH ADD HUA
+                    body: JSON.stringify({ payoutId: payoutId }) 
+                });
                 });
                 if (response.ok) { alert("✅ Payout Rejected & Refunded"); loadAllData(); } 
                 else { alert("❌ Failed to reject payout."); }
@@ -605,9 +624,19 @@
         }
 
         async function updateSolarStatus(leadId, newStatus, amount = 1500) {
-            let msg = newStatus === 'Paid' ? `Approve payout of ₹${amount} to User?` : "Mark site as verified?";
+            let msg = "";
+            if (newStatus === 'Paid') msg = `Approve payout of ₹${amount} to User?`;
+            else if (newStatus === 'Verified') msg = "Mark site as verified?";
+            else if (newStatus === 'Rejected') msg = "⚠️ Reject this Solar Lead? The user will NOT receive any commission.";
+
             if(!confirm(msg)) return;
-            await fetch(SOLAR_UPDATE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: leadId, newStatus: newStatus }) });
+            
+            await fetch(SOLAR_UPDATE_URL, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                credentials: 'same-origin',
+                body: JSON.stringify({ leadId: leadId, newStatus: newStatus }) 
+            });
             loadAllData();
         }
 
@@ -615,7 +644,12 @@
         async function updateYogaStatus(leadId, newStatus) {
             if(!confirm("Has the Yoga Institute verified this UTR? \n\nClicking OK will instantly add ₹300 to the Agent's wallet.")) return;
             try {
-                await fetch(YOGA_UPDATE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: leadId, newStatus: newStatus }) });
+                await fetch(YOGA_UPDATE_URL, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    credentials: 'same-origin', // 👈 YEH ADD HUA
+                    body: JSON.stringify({ leadId: leadId, newStatus: newStatus }) 
+                });
                 alert("✅ ₹300 Commission Sent!");
                 loadAllData();
             } catch(e) { alert("❌ Error connecting to server."); }
