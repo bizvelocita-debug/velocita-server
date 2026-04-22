@@ -75,18 +75,30 @@ const safeRedisSet = async (key, value, options) => {
     try { await redisClient.set(key, value, options); } catch(e) {} // ✅ Yahan redisClient hona chahiye
 };
 
-const safeRedisDel = async (key) => {
-    if (!isRedisConnected) return;
-    try { await redisClient.del(key); } catch(e) {} // ✅ Yahan redisClient hona chahiye
+const safeRedisSetNX = async (key, value, ttlSeconds) => {
+    // 1. Try Redis First
+    if (isRedisConnected) {
+        try { 
+            const result = await redisClient.set(key, value, { NX: true, EX: ttlSeconds }); 
+            return result === 'OK'; 
+        } catch(e) { console.log("Redis Lock Failed, trying Mongo..."); }
+    }
+    
+    // 2. 🛡️ MONGODB FALLBACK (Agar Redis down hai)
+    try {
+        await MutexLock.create({ key: key });
+        return true; 
+    } catch (e) {
+        if (e.code === 11000) return false; 
+        return true; 
+    }
 };
 
-// 🛡️ FIX 2: Atomic Lock Function (Returns true if lock acquired, false if already locked)
-const safeRedisSetNX = async (key, value, ttlSeconds) => {
-    if (!isRedisConnected) return true; // Fallback so app works if Redis dies
-    try { 
-        const result = await redisClient.set(key, value, { NX: true, EX: ttlSeconds }); 
-        return result === 'OK'; 
-    } catch(e) { return true; }
+const safeRedisDel = async (key) => {
+    if (isRedisConnected) {
+        try { await redisClient.del(key); } catch(e) {}
+    }
+    try { await MutexLock.deleteOne({ key: key }); } catch (e) {} 
 };
 
 // ==========================================
@@ -109,6 +121,13 @@ mongoose.connect(MONGO_URI)
 // ==========================================
 // 2. DATA MODELS
 // ==========================================
+// 🛡️ NAYA: MongoDB Lock Schema (Auto-deletes after 15 seconds)
+const mutexLockSchema = new mongoose.Schema({
+    key: { type: String, required: true, unique: true },
+    createdAt: { type: Date, expires: 15, default: Date.now } 
+});
+const MutexLock = mongoose.model('MutexLock', mutexLockSchema);
+
 const userSchema = new mongoose.Schema({
     deviceId: { type: String, required: true, unique: true }, 
     hardwareId: { type: String, default: null },               
@@ -773,27 +792,33 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 
         // 💰 REWARD ASSIGNMENT
         let finalAmount = 0;
+        
         if (taskId === 'scratch_card') {
-            // 🛡️ SECURITY FIX: Frontend ka amount lenge, par strict validation ke sath!
             const reqAmount = parseFloat(dynamicAmount) || 0;
-            
-            // Frontend generate karta hai 0.02 se 0.09 ke beech.
             if (reqAmount >= 0.02 && reqAmount <= 0.10) {
                 finalAmount = reqAmount;
             } else {
-                console.log(`🚨 HACK ATTEMPT BLOCKED: Invalid Scratch Amount from ${deviceId}`);
-                finalAmount = 0.02; // Fallback to minimum safe amount
+                console.log(`🚨 SCRATCH HACK BLOCKED: ${deviceId}`);
+                finalAmount = 0.02; 
             }
         } else if (TASK_REWARDS[taskId]) {
             finalAmount = TASK_REWARDS[taskId]; 
-        } else if (taskId.startsWith("Flash Task") || taskId === 'unknown' || taskId === 'weekly_bonus') {
+            
+        } else if (taskId === 'weekly_bonus') {
+            // 🛡️ FIX: Day 7 Jackpot Hack Blocker
             const reqAmount = parseFloat(dynamicAmount) || 0;
-            if (reqAmount > 0 && reqAmount <= 50) {
-                finalAmount = reqAmount;
-            } else {
-                await safeRedisDel(lockKey);
-                return res.status(400).json({ error: "Invalid Dynamic Amount" });
-            }
+            finalAmount = Math.min(reqAmount, 20.0); // Maximum Rs 20 hi allow karega
+            if (finalAmount <= 0) finalAmount = 5.0; 
+            
+        } else if (taskId === 'flash_task' || taskId.startsWith("Flash Task")) {
+            // 🛡️ FIX: Flash Task Hack Blocker
+            const reqAmount = parseFloat(dynamicAmount) || 0;
+            finalAmount = Math.min(reqAmount, 5.0); // Maximum Rs 5 hi allow karega
+            if (finalAmount <= 0) finalAmount = 1.0; 
+            
+        } else if (taskId === 'unknown') {
+            finalAmount = 0.05; // Fallback amount
+            
         } else {
             await safeRedisDel(lockKey);
             return res.status(400).json({ error: "Invalid Task ID" });
@@ -1033,10 +1058,23 @@ app.post('/my-solar-leads', verifyAppSignature, async (req, res) => {
     catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
+// 🛡️ FIX 2: Added Skip and Limit logic for proper Pagination
 app.post('/my-transactions', verifyAppSignature, async (req, res) => {
-    const deviceId = req.userEmail; // 🛡️ Firebase Token Email 
-    try { const payouts = await Payout.find({ deviceId }).sort({ date: -1 }); res.json(payouts); } 
-    catch (e) { res.status(500).json({ error: "Server Error" }); }
+    const deviceId = req.userEmail; 
+    const page = parseInt(req.body.page) || 1; // App se page number aayega, default 1
+    const limit = 20; // Ek baar me 20 transactions bhejenge
+    const skip = (page - 1) * limit;
+
+    try { 
+        const payouts = await Payout.find({ deviceId })
+                                    .sort({ date: -1 })
+                                    .skip(skip)
+                                    .limit(limit); 
+        res.json(payouts); 
+    } catch (e) { 
+        console.error("❌ Transaction Fetch Error:", e);
+        res.status(500).json({ error: "Server Error" }); 
+    }
 });
 
 app.post('/bindReferral', verifyAppSignature, async (req, res) => {
