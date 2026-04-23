@@ -877,21 +877,36 @@ app.post('/updateBalance', verifyAppSignature, async (req, res) => {
 // ==========================================
 // 💸 SECURE SERVER-TO-SERVER POSTBACK (GET Method for CPX)
 // ==========================================
-// 🚀 NAYA: app.post ki jagah app.get kar diya
 app.get('/postback', async (req, res) => {
-    const incomingIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    // 🛡️ 1. PROPER IP EXTRACTION
+    let incomingIp = req.socket.remoteAddress || "unknown_ip";
+    if (req.headers['x-forwarded-for']) {
+        incomingIp = req.headers['x-forwarded-for'].split(',')[0].trim();
+    }
+    // Handle IPv4 mapped IPv6 addresses (::ffff:)
+    if (incomingIp.startsWith('::ffff:')) {
+        incomingIp = incomingIp.substring(7);
+    }
 
-    // 🛡️ 1. SECRET KEY CHECK (URL Query se padhega)
-    const secret = req.query.secret || req.headers['x-postback-secret'];
+    // 🛡️ 2. STRICT IP WHITELISTING (CPX Servers Only)
+    const allowedIPs = ['188.40.3.73', '157.90.97.92', '2a01:4f8:d0a:30ff::2'];
+    if (!allowedIPs.includes(incomingIp)) {
+        console.error(`🚨 FAKE IP BLOCKED! Attack from: ${incomingIp}`);
+        return res.status(403).send("0");
+    }
+
+    // 🛡️ 3. SECRET KEY CHECK (Fix: CPX 'hash' bhejta hai)
+    const secret = req.query.hash || req.query.secret; 
     if (secret !== process.env.OFFERWALL_SECRET) {
         console.error(`🚨 FAKE POSTBACK BLOCKED! Invalid Secret from IP: ${incomingIp}`);
         return res.status(403).send("0");
     }
 
-    // 🚀 NAYA: req.body ki jagah req.query lagaya hai
-    const deviceId = req.query.ext_user_id || req.query.userid; 
+    // 📦 EXTRACT VARIABLES
+    const deviceId = req.query.userid || req.query.ext_user_id; 
     const amount = parseFloat(req.query.amount || req.query.reward);
     const txId = req.query.tx_id || req.query.transaction_id;
+    const status = parseInt(req.query.status); // 🔥 NAYA: Fraud track karne ke liye
 
     if (!deviceId || isNaN(amount) || !txId) {
         return res.status(400).send("0"); 
@@ -899,13 +914,33 @@ app.get('/postback', async (req, res) => {
 
     try {
         const existingTx = await OfferwallTx.findOne({ txId });
-        if (existingTx) return res.status(200).send("1"); // Already processed
 
+        // 🛑 4. STATUS LOGIC (CRITICAL FOR FRAUD PREVENTION)
+        // Agar CPX bole ki user ne fraud kiya hai (status = 2)
+        if (status === 2) {
+            console.log(`⚠️ CPX CANCELED/FRAUD DETECTED for Tx: ${txId}. No money added.`);
+            if (!existingTx) {
+                // Fraud record save kar lo future reference ke liye (amount = 0)
+                await new OfferwallTx({ txId, deviceId, amount: 0, date: Date.now() }).save();
+            }
+            return res.status(200).send("1"); // CPX ko bata do hume cancel request mil gayi
+        } 
+        
+        // Agar status 1 (Success) nahi hai, toh ignore karo
+        if (status !== 1) {
+            return res.status(200).send("1"); 
+        }
+
+        // --- YAHAN SE AAGE SIRF TAB AAYEGA JAB SURVEY 100% SUCCESS HO ---
+        if (existingTx) return res.status(200).send("1"); // Pehle se paisa de chuke hain
+
+        // 💰 Nayi successful transaction save karo
         await new OfferwallTx({ txId, deviceId, amount }).save();
 
         const user = await User.findOne({ deviceId });
         if (!user) return res.status(404).send("0");
 
+        // 🧮 PAISE ADD KARO (Safe Decimal Math)
         user.balance = parseFloat((user.balance + amount).toFixed(4));
         user.dailyTaskMeter = parseFloat((user.dailyTaskMeter + amount).toFixed(4));
 
@@ -913,6 +948,7 @@ app.get('/postback', async (req, res) => {
             user.goldenPassUnlocked = true; 
         }
 
+        // 💸 Upline Referral Commission (10%)
         if (user.referredBy && !user.hasWithdrawnEver) {
             const upline = await User.findOne({ deviceId: user.referredBy });
             if (upline) {
@@ -920,15 +956,25 @@ app.get('/postback', async (req, res) => {
                 upline.balance = parseFloat((upline.balance + commission).toFixed(4));
                 upline.networkEarnings = parseFloat((upline.networkEarnings + commission).toFixed(4));
                 await upline.save();
-                await safeRedisSet(`user_${upline.deviceId}`, JSON.stringify(upline), { EX: 900 });
+                // Redis Update
+                const safeRedisSet = async (k, v, opt) => { try { await redisClient.set(k, v, opt); } catch(e){} };
+                if (typeof safeRedisSet === 'function') {
+                   await safeRedisSet(`user_${upline.deviceId}`, JSON.stringify(upline), { EX: 900 });
+                }
             }
         }
 
         await user.save();
-        await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 900 });
         
-        res.status(200).send("1"); // CPX expects "1" for success
+        // 💾 Main user ka Redis cache update karo
+        if (typeof safeRedisSet === 'function') {
+            await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 900 });
+        }
+        
+        console.log(`✅ CPX Postback Success: ₹${amount} added for ${deviceId}`);
+        res.status(200).send("1"); 
     } catch (e) {
+        console.error("Postback Error:", e);
         res.status(500).send("0");
     }
 });
