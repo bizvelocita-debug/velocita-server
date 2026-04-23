@@ -979,6 +979,84 @@ app.get('/postback', async (req, res) => {
     }
 });
 
+// ==========================================
+// 💎 SECURE POSTBACK FOR VCOMMISSION DEALS
+// ==========================================
+app.get('/vcomm-postback', async (req, res) => {
+    // 🛡️ 1. SECRET KEY CHECK
+    // Yahan hum wahi secret check kar rahe hain jo tumne URL me dala hai
+    const secret = req.query.secret;
+    if (secret !== process.env.OFFERWALL_SECRET) {
+        console.error(`🚨 VCOMM FAKE POSTBACK BLOCKED! Invalid Secret.`);
+        return res.status(403).send("Unauthorized");
+    }
+
+    // 📦 EXTRACT VARIABLES (As per your vCommission URL)
+    const deviceId = req.query.userid; // URL mein {p2} se aayega
+    const amount = parseFloat(req.query.reward); // URL mein {payout} se aayega
+    const txId = req.query.tx_id; // URL mein {click_id} se aayega
+
+    // Agar data missing hai toh error de do
+    if (!deviceId || isNaN(amount) || !txId) {
+        return res.status(400).send("Bad Request: Missing parameters");
+    }
+
+    try {
+        // 🛑 DOUBLE ENTRY CHECK (Taaki ek task ka do baar paisa na mile)
+        const existingTx = await OfferwallTx.findOne({ txId });
+        if (existingTx) {
+            console.log(`⚠️ vCommission Tx already processed: ${txId}`);
+            return res.status(200).send("OK"); // Already processed
+        }
+
+        // 💰 Nayi successful transaction save karo
+        await new OfferwallTx({ txId, deviceId, amount }).save();
+
+        // 🧑 User dhundho
+        const user = await User.findOne({ deviceId });
+        if (!user) return res.status(404).send("User Not Found");
+
+        // 🧮 PAISE ADD KARO
+        user.balance = parseFloat((user.balance + amount).toFixed(4));
+        user.dailyTaskMeter = parseFloat((user.dailyTaskMeter + amount).toFixed(4));
+
+        if (user.dailyTaskMeter >= 50.0 && !user.goldenPassUnlocked) { 
+            user.goldenPassUnlocked = true; 
+        }
+
+        // 💸 Upline Referral Commission (10%)
+        if (user.referredBy && !user.hasWithdrawnEver) {
+            const upline = await User.findOne({ deviceId: user.referredBy });
+            if (upline) {
+                const commission = amount * 0.10;
+                upline.balance = parseFloat((upline.balance + commission).toFixed(4));
+                upline.networkEarnings = parseFloat((upline.networkEarnings + commission).toFixed(4));
+                await upline.save();
+                
+                // Redis Update
+                const safeRedisSet = async (k, v, opt) => { try { await redisClient.set(k, v, opt); } catch(e){} };
+                if (typeof safeRedisSet === 'function') {
+                   await safeRedisSet(`user_${upline.deviceId}`, JSON.stringify(upline), { EX: 900 });
+                }
+            }
+        }
+
+        await user.save();
+        
+        // 💾 Main user ka Redis cache update karo
+        if (typeof safeRedisSet === 'function') {
+            await safeRedisSet(`user_${deviceId}`, JSON.stringify(user), { EX: 900 });
+        }
+        
+        console.log(`✅ vCommission Deal Success: ₹${amount} added for ${deviceId}`);
+        res.status(200).send("OK"); // vCommission expects a simple OK success response
+        
+    } catch (e) {
+        console.error("vCommission Postback Error:", e);
+        res.status(500).send("Server Error");
+    }
+});
+
 // 🎯 LIVE ARENA ANSWER EVALUATOR
 app.post('/submit-answer', verifyAppSignature, async (req, res) => {
     const deviceId = req.userEmail;
