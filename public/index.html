@@ -617,7 +617,7 @@
                     credentials: 'same-origin', // 👈 YEH ADD HUA
                     body: JSON.stringify({ payoutId: payoutId }) 
                 });
-                });
+                
                 if (response.ok) { alert("✅ Payout Rejected & Refunded"); loadAllData(); } 
                 else { alert("❌ Failed to reject payout."); }
             } catch(e) { alert("❌ Connection Error."); }
